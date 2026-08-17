@@ -1,0 +1,235 @@
+/*                    -*- C -*-                                            */
+/*       The language compiler definitions by E.V., (C) 2003               */
+/*
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation; either version 2 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*/
+#define WORDSIZE 4
+#define BYTESIZE 1
+#define linesize 180
+#define linemax linesize-1
+#define mpmax linemax
+#define FILESIZE 160 /* source names carried by lpp1 line markers */
+#define stif 1
+#define stwhile 2
+#define streturn 3
+#define stbreak 4
+#define stcont 5
+#define stasm 6
+#define stexp 7
+#define stfor 9
+#define stdo 10
+#define stswitch 11
+#define NAMESIZE 16
+#define NAMEMAX 15
+
+struct snamenode{
+  [NAMESIZE]char name;
+  *snamenode next;
+  func init;
+  func done;
+};
+struct snamelist{
+  *snamenode lst;
+  **snamenode front;
+  func init;
+  func done;
+  func find;
+  func addm;
+  func dump;
+};
+struct ssym{
+  [NAMESIZE]char name;
+  int sort;
+  int dfd;
+  int offset;
+  int type;
+  int line;
+  *snamelist nmlst;
+  int cnst; /* M6 const: 1 if this variable may not be assigned to (added last so existing field offsets are unchanged) */
+  int ginit; /* global initializer kind (GI_*); the value or pool index is in offset */
+  int isva;  /* variadic function: parameter list ended with ... */
+  int nfixed;/* number of named parameters before ... */
+  int wused; /* referenced at least once (unused-variable warning); params start 1 */
+  [FILESIZE]char wfile; /* declaration file for deferred unused-variable warnings */
+  int ispar; /* -g: declared parameter (do not infer this from its frame offset) */
+  int promid; /* source-local identity used by register promotion and -g */
+  func init;
+  func done;
+};
+/* global initializer kinds (ssym.ginit); GI_VAL keeps the value in sym.offset,
+   the text kinds keep a float-pool index there (the assembler computes them).
+   GI_SLIT keeps a string-pool byte offset (the address .L<stlab>+off is laid
+   down), GI_STR the same for a char array holding the bytes themselves, and
+   GI_ARR an index into the gainit element table (count, then kind/val pairs). */
+#define GI_NONE 0
+#define GI_VAL  1
+#define GI_WIDE 2
+#define GI_FLT  3
+#define GI_SLIT 4
+#define GI_STR  5
+#define GI_ARR  6
+struct ssymlist{
+  ssym sym;
+  *ssymlist next;
+};
+struct ssymtab{
+  *ssymlist lst;
+  **ssymlist front;
+};
+var extern glbsymtab,locsymtab:ssymtab;
+
+#define S_FUNC 1
+#define S_VARG 2
+#define S_VARL 3
+#define S_CONST 4 /* enum constant: a named integer (value in sym.offset) */
+#define T_INT 1
+#define T_CHAR 2
+#define T_INTP 3
+#define T_DOUBLE 4 /* M4: 8-byte double (x86_64/SSE2) */
+#define T_CHARP 5
+#define T_FLOAT 6 /* M4 slice 5: 4-byte float (stored single, computed double) */
+#define T_UINT 7 /* M6: unsigned int (word-size). issigned()=false, so compares and >> route to the unsigned variants; arithmetic propagates unsignedness */
+#define T_LLONG 8 /* long long: always 8-byte signed (i386 rejected for now) */
+#define T_ULLONG 9 /* unsigned long long: 8-byte unsigned */
+#define T_UCHAR 10 /* unsigned char: byte storage, zero-extended on load (0..255) */
+#define F_TYPE 11 /*first user-defined type*/
+
+#define NUMTYP 50
+#define MAXTYP 49
+#define TYPNMTBS 800
+#define V_PTR 1
+#define V_ARR 2
+#define V_STR 3
+#define V_FND 4
+#define V_FNC 5
+struct styp{
+  [NAMESIZE]char name;
+  int sort;
+  int type;
+  int dim;
+  int size;
+  int ptr;
+};
+
+#define NMSTRELE 50
+/*#define STRNMTBS 800*/
+struct sfield{
+  [NAMESIZE]char name;
+  int type;
+  int offset;
+  int next;
+};
+
+/* -g: a block-scoped local harvested at scope exit (ssymtabcut) so its DWARF
+   variable DIE can still be emitted at function end, after the symbol is gone */
+struct sdbgloc{
+  [NAMESIZE]char name;
+  int typ;
+  int off;
+  int promid;
+};
+
+#define litstksz 30000
+#define litstknu 15
+
+/* The per-unit string-literal pool (litq in langc.e) grows on demand -- no
+   fixed size. It was a 16000-byte array until 2026-07; the planned IDE is a
+   UI-string-heavy unit far past any headroom worth hardcoding. */
+
+#define WQNUM 75
+#define WQMAX 74
+
+
+/* the expression processing */
+#define OP_LEAF    0
+#define OP_COMMA   1
+#define OP_ASSIGN  2
+#define OP_COND    3
+#define OP_LOR     4
+#define OP_LAND    5
+#define OP_BOR     6
+#define OP_BXOR    7
+#define OP_BAND    8
+#define OP_EQ      9
+#define OP_NEQ    10
+#define OP_LE     11
+#define OP_GE     12
+#define OP_LT     13
+#define OP_GT     14
+#define OP_SHL    15
+#define OP_SHR    16
+#define OP_PLUS   17
+#define OP_MINUS  18
+#define OP_MUL    19
+#define OP_DIV    20
+#define OP_REM    21
+#define OP_1PP    22
+#define OP_1MM    24
+#define OP_UPLUS  25
+#define OP_UMINUS 26
+#define OP_STAR   27
+#define OP_ADDR   28
+#define OP_LNOT   29
+#define OP_BNOT   30
+#define OP_2PP    31
+#define OP_2MM    32
+#define OP_SQ     33
+#define OP_FUNC   34
+#define OP_DOT    35
+#define OP_LIST   36
+
+#define L_NUM 1
+#define L_ID  2
+#define L_STR 3
+
+/* pointed by %eax */
+#define L_POI 4
+/* pointed by (%esp) */
+#define L_SP 5
+/* on %eax */
+#define L_ONREG 5
+#define L_FNUM 6 /* M4: floating-point literal (index into the float pool) */
+#define L_WNUM 7 /* wide (64-bit) integer literal: kept as text (float-pool index), the assembler computes the value */
+#define L_VAST 8 /* vastart(): pointer to the first variadic argument of the current function */
+struct eleaf{
+  int vid;
+  int val;/* number or index in the symbol table*/
+  *ssym idx;
+};
+struct enode{
+  *enode l;
+  *enode r;
+  *enode third;
+  int op;
+  eleaf leaf;
+  [NAMESIZE]char name;
+};
+
+struct elval{
+  int sort; /* object, number, string -> L_ID,L_NUM,L_STR*/
+  *ssym idx;  /* index in the symbol table, if object */
+  int offset; /*offset in a compound object */
+  int typ;    /* type */
+  int val;
+  [NAMESIZE]char name;
+};
+/*return value: 0: on register, 1: not on register */
+
+/* The target descriptor `starget`/`target` lives in codegen.he, so that the
+   instruction lowering in codegen.e can read it (the headers have no include
+   guards, so codegen.e cannot include this file). See RETARGET-PHASE2.md. */
+
+var extern *char:graphname;
+var extern stderr,stdin,stdout:*int;
