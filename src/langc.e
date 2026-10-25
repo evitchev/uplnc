@@ -177,6 +177,7 @@ func ssymtabcut(p:*ssymtab,w:**ssymlist)
        dies with its block scope -- harvest what the DIE needs first. */
     if(g_debug&&(i->sym.sort==S_VARL))
     dbglocadd(i->sym.name,i->sym.type,i->sym.offset,i->sym.promid);
+    warnunused(&i->sym);   /* its last chance: no reference can follow */
     i->sym.done();   /* release the symbol's nmlst, as ssymtabfree does */
     free(i);
   }
@@ -2153,32 +2154,11 @@ func dofunc()
      argument spills, and any promoted-parameter entry loads are complete. */
   if(g_debug)zpromstart(nfunc);
   statemen();
-  /* unused-variable warnings: body locals never referenced after declaration.
-     Parameters and 'this' are pre-marked used; hidden temps/sret start with a
-     digit. The warning is located at the declaration file and line. */
+  /* unused-variable warnings for the locals still open at the function end;
+     block-scoped ones were checked when their scope closed (ssymtabcut) */
   {
     var *ssymlist:wl;
-    var [64]char:wmsg;
-    var [FILESIZE]char:savecf;
-    var int:wk,wj,savecl;
-    for(wl=locsymtab.lst;wl;wl=wl->next)
-    if((wl->sym.sort==S_VARL)&&(!wl->sym.wused)
-    &&((wl->sym.name[0]<'0')||(wl->sym.name[0]>'9')))
-    {
-      strcp(wmsg,"unused variable '");
-      wk=strlen1(wmsg);
-      wj=0;
-      while(wl->sym.name[wj]&&(wk<60))wmsg[wk++]=wl->sym.name[wj++];
-      wmsg[wk++]=39;
-      wmsg[wk]=0;
-      savecl=cline;
-      strcp(savecf,cfile);
-      cline=wl->sym.line;
-      strcp(cfile,wl->sym.wfile);
-      warning(wmsg);
-      cline=savecl;
-      strcp(cfile,savecf);
-    }
+    for(wl=locsymtab.lst;wl;wl=wl->next)warnunused(&wl->sym);
   }
   /*ol("movl %ebp, %esp");
   ol("popl %ebp");*/
@@ -2200,6 +2180,31 @@ func dofunc()
   cnmlst=savenmlst;
   /*fprintf(stderr,"dofunc:ccg=%d\n",ccg);*/
 }
+/* unused-variable warning: a body local never referenced after declaration.
+   Parameters and 'this' are pre-marked used; hidden temps/sret start with a
+   digit. The warning is located at the declaration file and line. */
+func warnunused(s:*ssym)
+{
+  var [64]char:wmsg;
+  var [FILESIZE]char:savecf;
+  var int:wk,wj,savecl;
+  if((s->sort!=S_VARL)||s->wused||((s->name[0]>='0')&&(s->name[0]<='9')))
+  return 0;
+  strcp(wmsg,"unused variable '");
+  wk=strlen1(wmsg);
+  wj=0;
+  while(s->name[wj]&&(wk<60))wmsg[wk++]=s->name[wj++];
+  wmsg[wk++]=39;
+  wmsg[wk]=0;
+  savecl=cline;
+  strcp(savecf,cfile);
+  cline=s->line;
+  strcp(cfile,s->wfile);
+  warning(wmsg);
+  cline=savecl;
+  strcp(cfile,savecf);
+  return 0;
+}
 func _zret()
 {
   ol("ret");
@@ -2215,7 +2220,11 @@ func statemen()
      included); without markers (raw stdin) there is no file to name, so skip. */
   if(g_debug&&cfile[0])zloc(cline,cfile);
   if(amatch("var",3))dolocvar();
-  else if(match(tlcomp/*"{"*/))compound();
+  else if(match(tlcomp/*"{"*/))
+  {
+    if(ncmp)doblock();   /* a nested block is a name scope */
+    else compound();     /* the function body: dofunc reads its locals after */
+  }
   else if(amatch("if",2))
   {
     doif();
@@ -2423,6 +2432,18 @@ func compound()
   }
   --ncmp;
   g_stmtclosed=1;
+}
+/* A nested { } block is a name scope, like a control-flow body: its locals
+   die at the closing brace and their frame slots are reused. */
+func doblock()
+{
+  var **ssymlist:blev;
+  var int:bsp;
+  blev=locsymtab.front;
+  bsp=Zsp;
+  compound();
+  Zsp=modstk(bsp);
+  ssymtabcut(&locsymtab,blev);
 }
 func modstk(newsp:int)
 {
