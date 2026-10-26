@@ -241,6 +241,7 @@ var nitree,aitree:int;
 var g_vaoff:int;      /* varargs: frame offset of this function's va area (0 = not variadic) */
 var g_stmtexp:int;    /* set by statemen for a bare expression statement (no-effect warning) */
 var g_stmtclosed:int; /* the current statement consumed its ; or closing } */
+var g_fnbody:int;     /* the next statement is a function's own body (dofunc) */
 var mline:[linesize]char;
 var lptr:int;
 var mptr:int;
@@ -2153,6 +2154,7 @@ func dofunc()
   /* Parameter frame/register locations become valid only after the frame,
      argument spills, and any promoted-parameter entry loads are complete. */
   if(g_debug)zpromstart(nfunc);
+  g_fnbody=1;
   statemen();
   /* unused-variable warnings for the locals still open at the function end;
      block-scoped ones were checked when their scope closed (ssymtabcut) */
@@ -2211,7 +2213,12 @@ func _zret()
 }
 func statemen()
 {
+  var int:fnbody;
   /*fprintf(stderr,"statemen():ccg=%d\n",ccg);*/
+  /* Only the function's own statement sees the mark, whatever it is; brace
+     depth can't tell, as a body need not be braced (`func f() switch ...`). */
+  fnbody=g_fnbody;
+  g_fnbody=0;
   g_stmtclosed=0;
   blanks();
   if((!ch())&&iseof)return 0;
@@ -2222,8 +2229,8 @@ func statemen()
   if(amatch("var",3))dolocvar();
   else if(match(tlcomp/*"{"*/))
   {
-    if(ncmp)doblock();   /* a nested block is a name scope */
-    else compound();     /* the function body: dofunc reads its locals after */
+    if(fnbody)compound();  /* the function body: dofunc reads its locals after */
+    else doblock();        /* any other block is a name scope */
   }
   else if(amatch("if",2))
   {

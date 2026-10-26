@@ -877,8 +877,11 @@ What turns a teaching compiler into something you'd build a project with:
     `compound()`, then restores the stack and `ssymtabcut`s. Sibling blocks
     reuse names (with any type) and frame slots, inner blocks see enclosing
     names, and `break`/`continue`/`return` leave a block with locals correctly.
-    The function body's own braces (`ncmp==0`) stay open, because `dofunc`
-    reads its locals afterwards for warnings and DWARF. Shadowing an enclosing
+    The function body's own braces stay open, because `dofunc` reads its
+    locals afterwards for warnings and DWARF; `dofunc` marks that statement
+    (`g_fnbody`) rather than relying on brace depth, since a body need not be
+    braced (`func f() switch(n){...}` parses its braces in `doswitch`, so blocks
+    in its cases sat at depth 0 and were missed). Shadowing an enclosing
     local remains a `local multidef` error; a name used after its block falls
     back to an external symbol (a link-time `undefined reference`), like any
     undeclared name. The unused-variable warning moved into `warnunused()` and

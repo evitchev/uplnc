@@ -1,7 +1,8 @@
 /* A plain { } block is a name scope: its locals die at the closing brace and
    their frame slots are reused, as for a control-flow body. Sibling blocks
    reuse names (with other types and sizes), inner blocks see outer names, and
-   break/continue/return leave a block with locals. Returns the number of the
+   break/continue/return leave a block with locals, also in an unbraced
+   function body. Returns the number of the
    first failing check. -> 42 */
 func sumsq(n:int)
 {
@@ -36,6 +37,31 @@ func depth(n:int)
     u=r;
     return u;
   }
+}
+/* A function body need not be braced: blocks directly inside an unbraced
+   body (here a switch, which parses its own braces) are scopes too. */
+func swbody(n:int)
+switch(n)
+{
+  case 1:
+  {
+    var int:x;
+    x=10;
+    n=n+x;
+  }
+  {
+    var *char:x;
+    x="ab";
+    n=n+x[1]-'b';
+  }
+  case 2:
+  {
+    var int:x;
+    x=20;
+    return n+x;
+  }
+  default:
+  return 0;
 }
 func main()
 {
@@ -106,5 +132,6 @@ func main()
     s=s+acc;
   }
   if(s!=34)return 9;   /* 10 + 24 */
+  if((swbody(1)!=31)||(swbody(2)!=22)||swbody(3))return 10;   /* 1 falls into 2 */
   return 42;
 }
