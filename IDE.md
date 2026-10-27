@@ -139,8 +139,10 @@ and other languages" reduces mostly to configuration.
 
 Found while writing slice 1a, both worth knowing before phase 1 continues:
 
-- **Plain braces are not a name scope** (LANGUAGE.md §6.1), so two `{ var i; }`
-  blocks in one function collide. Declare loop variables once per function.
+- ~~**Plain braces are not a name scope**~~ — fixed (2026-10): a nested `{ }`
+  block now closes its locals like a control-flow body (LANGUAGE.md §5), so two
+  `{ var i; }` blocks in one function no longer collide. Shadowing an
+  enclosing local is still an error.
 - **A typed method must declare its return type in the struct slot**
   (`func line:*char;`); an annotation on the definition may repeat it but not
   introduce it. Nothing else about methods needed working around: sibling

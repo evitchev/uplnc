@@ -253,8 +253,14 @@ prototype should also precede any call whose variadic status matters.
 
 Local names become visible at their declaration. Redeclaring an active local
 name is an error; shadowing is not supported. A control-flow statement removes
-locals introduced in its body when that statement ends. Braces used as a plain
-compound statement do not create a separate name scope in version 0.
+locals introduced in its body when that statement ends, and a brace-enclosed
+block nested in a function body removes the locals introduced in it at its
+closing brace. Their storage may be reused by later locals, and a sibling block
+may declare the same name again with any type. The braces of the function body
+itself do not close a separate scope. Once its scope has ended, a name no
+longer denotes the local: like any name with no visible declaration, it then
+denotes the address of an external symbol of that name (as a bare function
+name does), so a stray use fails at link time unless such a symbol exists.
 
 ## 6. Declarations
 

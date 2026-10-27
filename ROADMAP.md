@@ -870,6 +870,29 @@ What turns a teaching compiler into something you'd build a project with:
     no signature), and multiplies against varargs/sret/FP-args/methods — all
     for interop UPLNC does not need. Revisit only if C-ABI struct interop with
     external libraries becomes a goal, as its own milestone.
+  - ✅ **Plain `{ }` blocks are name scopes** (2026-10; found by the IDE's
+    slice 1a, which had to declare loop variables once per function). A nested
+    block now closes its locals at the closing brace exactly as a control-flow
+    body already did: `doblock()` saves the symbol-table front and `Zsp`, runs
+    `compound()`, then restores the stack and `ssymtabcut`s. Sibling blocks
+    reuse names (with any type) and frame slots, inner blocks see enclosing
+    names, and `break`/`continue`/`return` leave a block with locals correctly.
+    The function body's own braces stay open, because `dofunc` reads its
+    locals afterwards for warnings and DWARF; `dofunc` marks that statement
+    (`g_fnbody`) rather than relying on brace depth, since a body need not be
+    braced (`func f() switch(n){...}` parses its braces in `doswitch`, so blocks
+    in its cases sat at depth 0 and were missed). Shadowing an enclosing
+    local remains a `local multidef` error; a name used after its block falls
+    back to an external symbol (a link-time `undefined reference`), like any
+    undeclared name. The unused-variable warning moved into `warnunused()` and
+    also runs when a scope closes, so block locals are warned — including
+    control-flow-body locals, which were never checked before; the whole tree
+    surfaced no new warnings. Only `langc.e`'s own output changes (its new
+    functions, and plain blocks such as `primary`'s that now release their
+    slots): every other unit and corpus program emits byte-identical assembly
+    on all five targets, with and without `-g`, and all five fixpoints reach.
+    `block_scope` golden test on all five backends, plus harness checks for
+    shadowing, use after the block, and block-local warnings.
 - ✅ A written **language specification v0** — [`LANGUAGE.md`](LANGUAGE.md)
   defines the current preprocessor and lexical rules, prefix type grammar,
   target data models, declarations, functions and methods, control flow,

@@ -719,6 +719,34 @@ EMPTYINIT
         bad "include-local warning must not fail the compile"
     fi
 
+    # A nested { } block is a name scope (tests/progs/block_scope.e runs the
+    # positive cases). Shadowing an enclosing local stays an error; a name used
+    # after its block no longer resolves to the dead slot; block-scoped locals
+    # (plain and control-flow bodies alike) get the unused-variable warning.
+    printf 'func main()\n{\n  var int:x;\n  x=1;\n  {\n    var int:x;\n    x=2;\n  }\n  return x;\n}\n' > "$TMPD/uplnc_shadow.e"
+    "$LPP" "$TMPD/uplnc_shadow.e" 2>/dev/null | "$LANGC" -march=x86_64 > "$TMPD/uplnc_shadow.s" 2>"$TMPD/uplnc_shadow.err"
+    grep -q ':6: Error:local multidef' "$TMPD/uplnc_shadow.err" \
+        && ok "a block local cannot shadow an enclosing local" \
+        || bad "block-local shadowing diagnosed"
+    printf 'func main()\n{\n  {\n    var int:gone;\n    gone=1;\n  }\n  return gone;\n}\n' > "$TMPD/uplnc_blkgone.e"
+    if perl "$DRIVER" "-march=$DRVARCH" -o "$TMPD/uplnc_blkgone" "$TMPD/uplnc_blkgone.e" \
+            >/dev/null 2>"$TMPD/uplnc_blkgone.err"; then
+        bad "a block local must not be visible after its block"
+    else
+        grep -q 'undefined reference.*gone' "$TMPD/uplnc_blkgone.err" \
+            && ok "a block local is not visible after its block" \
+            || bad "block local after its block: $(tail -1 "$TMPD/uplnc_blkgone.err")"
+    fi
+    printf 'func main()\n{\n  var int:n;\n  n=1;\n  {\n    var int:pdead;\n  }\n  if(n)\n  {\n    var int:cdead;\n  }\n  return 0;\n}\n' > "$TMPD/uplnc_blkwarn.e"
+    if "$LPP" "$TMPD/uplnc_blkwarn.e" 2>/dev/null | "$LANGC" -march=x86_64 > "$TMPD/uplnc_blkwarn.s" 2>"$TMPD/uplnc_blkwarn.err"; then
+        grep -q ":6: Warning:unused variable 'pdead'" "$TMPD/uplnc_blkwarn.err" \
+            && grep -q ":10: Warning:unused variable 'cdead'" "$TMPD/uplnc_blkwarn.err" \
+            && ok "block-scoped locals get the unused-variable warning" \
+            || bad "block-scoped unused-variable warnings"
+    else
+        bad "block-scoped unused locals must not fail the compile"
+    fi
+
     # duplicate case labels must be diagnosed
     printf 'func main(){var int:x;x=1;switch(x){case 1:return 7;case 1:return 8;}return 0;}\n' > "$TMPD/uplnc_dupcase.e"
     "$LPP" "$TMPD/uplnc_dupcase.e" 2>/dev/null | "$LANGC" -march=x86_64 > "$TMPD/uplnc_dupcase.s" 2>/dev/null
