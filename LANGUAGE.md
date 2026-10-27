@@ -261,6 +261,10 @@ itself do not close a separate scope. Once its scope has ended, a name no
 longer denotes the local: like any name with no visible declaration, it then
 denotes the address of an external symbol of that name (as a bare function
 name does), so a stray use fails at link time unless such a symbol exists.
+The compiler warns about any use of such a name other than a direct call,
+unless the unit defines or declares a function of that name somewhere; a use
+of a global variable or enum constant that precedes its declaration denotes
+the address, not the value, and is warned as used before its declaration.
 
 ## 6. Declarations
 

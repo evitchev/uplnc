@@ -526,6 +526,17 @@ What turns a teaching compiler into something you'd build a project with:
     comparison statement** (`x == 5;` — the `==`-vs-`=` typo). Dogfooding them found and
     removed nine dead variables in the compiler's own source; self-compile is
     warning-free. Six harness checks pin recovery, the cap, and both warnings.
+  - ✅ *Undeclared identifiers* (2026-10): a name with no visible declaration
+    still compiles to the address of an external symbol of that name, but any
+    use other than a direct call is now warned, once per name. The verdict
+    waits for the end of the unit (`chkundecl`), so a function used as a value
+    before its definition stays quiet; a global or enum constant used before
+    its declaration, whose earlier use took its address rather than its value,
+    gets "used before its declaration". Calls to undeclared functions stay
+    quiet (old-style external calls). Motivated by block scoping: a block local
+    used after its block that shares a libc name (`time`) linked and ran with no
+    diagnostic at all. The whole tree surfaces no new warnings, and only
+    `langc.e`'s own output changes.
   Still open: columns in the caret line are byte-offsets (good enough)
 - 🟡 A small **standard library** — v0 started, grown from the M7 dogfooding
   needs: `lib/fmt.e` provides `putf(fmt,...)`, a mini printf (`%d %u %x %c %s

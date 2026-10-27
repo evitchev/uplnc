@@ -747,6 +747,23 @@ EMPTYINIT
         bad "block-scoped unused locals must not fail the compile"
     fi
 
+    # Undeclared identifiers: a value use of a name with no declaration is a
+    # warning, once per name, judged at the end of the unit. A stray block
+    # local named like a libc symbol (time) would otherwise link silently.
+    # Calls to undeclared functions stay quiet (old-style external calls), as
+    # does a function used as a value before its definition (later); a global
+    # used before its declaration (glate) took its address and is flagged.
+    printf 'func main()\n{\n  {\n    var int:time;\n    time=7;\n  }\n  if(time==7)return 1;\n  if(time)return 2;\n  puts("x");\n  qsort(0,0,0,later);\n  return glate;\n}\nfunc later(){return 0;}\nvar int:glate;\n' > "$TMPD/uplnc_undecl.e"
+    if "$LPP" "$TMPD/uplnc_undecl.e" 2>/dev/null | "$LANGC" -march=x86_64 > "$TMPD/uplnc_undecl.s" 2>"$TMPD/uplnc_undecl.err"; then
+        grep -q ":7: Warning:undeclared identifier 'time'" "$TMPD/uplnc_undecl.err" \
+            && grep -q ":11: Warning:'glate' used before its declaration" "$TMPD/uplnc_undecl.err" \
+            && [ "$(grep -c 'Warning:' "$TMPD/uplnc_undecl.err")" = 2 ] \
+            && ok "value uses of undeclared names are warned, calls are not" \
+            || bad "undeclared-identifier warnings: $(tr '\n' '|' < "$TMPD/uplnc_undecl.err")"
+    else
+        bad "undeclared-identifier warnings must not fail the compile"
+    fi
+
     # duplicate case labels must be diagnosed
     printf 'func main(){var int:x;x=1;switch(x){case 1:return 7;case 1:return 8;}return 0;}\n' > "$TMPD/uplnc_dupcase.e"
     "$LPP" "$TMPD/uplnc_dupcase.e" 2>/dev/null | "$LANGC" -march=x86_64 > "$TMPD/uplnc_dupcase.s" 2>/dev/null

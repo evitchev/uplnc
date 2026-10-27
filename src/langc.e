@@ -233,6 +233,9 @@ var dbgmain:[FILESIZE]char; /* -g: the unit's first marker file = DWARF CU name 
 var g_cu:int;         /* -g: CU header + abbrev table already emitted */
 var dbgloclst:*sdbgloc; /* -g: block locals harvested at scope exit (per fn) */
 var ndbgloc,adbgloc:int;
+var undecl:*sundecl;  /* value uses of undeclared names, one per name (chkundecl) */
+var nundecl,aundecl:int;
+var g_implfn:int;     /* primary() resolved its name to an implicit function */
 var g_promid:int;    /* unique identity for each promotable local in a function */
 var g_infok:int;     /* a `[]` dimension may be inferred in this declaration */
 var g_infarr:int;    /* ... and gettypen consumed one (outermost constructor) */
@@ -487,6 +490,7 @@ func main(argc:int,argv:**char)
   icodegen();
   header();
   parse();
+  chkundecl();
   dumplits();
   dumpfloats();
   dumpglbs();
@@ -508,6 +512,7 @@ func main(argc:int,argv:**char)
   if(gainit)free(gainit);
   if(litq)free(litq);
   if(itreelst)free(itreelst);
+  if(undecl)free(undecl);
   /*fprintf(stderr,"(%d)(%d)%s%s",pp,pp2,pp,pp2);*/
   donedyn();
   if(errcnt)return 1;
@@ -2187,25 +2192,69 @@ func dofunc()
    digit. The warning is located at the declaration file and line. */
 func warnunused(s:*ssym)
 {
-  var [64]char:wmsg;
-  var [FILESIZE]char:savecf;
-  var int:wk,wj,savecl;
   if((s->sort!=S_VARL)||s->wused||((s->name[0]>='0')&&(s->name[0]<='9')))
   return 0;
-  strcp(wmsg,"unused variable '");
-  wk=strlen1(wmsg);
-  wj=0;
-  while(s->name[wj]&&(wk<60))wmsg[wk++]=s->name[wj++];
-  wmsg[wk++]=39;
+  warnat("unused variable '",s->name,"'",s->line,s->wfile);
+  return 0;
+}
+/* warning() located at a recorded line and file rather than the current one;
+   the message is pre, the name, then post. */
+func warnat(pre:*char,nm:*char,post:*char,ln:int,fl:*char)
+{
+  var [WMSGSIZE]char:wmsg;
+  var [FILESIZE]char:savecf;
+  var int:wk,savecl;
+  wk=0;
+  while(*pre&&(wk<WMSGSIZE-1))wmsg[wk++]=*pre++;
+  while(*nm&&(wk<WMSGSIZE-1))wmsg[wk++]=*nm++;
+  while(*post&&(wk<WMSGSIZE-1))wmsg[wk++]=*post++;
   wmsg[wk]=0;
   savecl=cline;
   strcp(savecf,cfile);
-  cline=s->line;
-  strcp(cfile,s->wfile);
+  cline=ln;
+  strcp(cfile,fl);
   warning(wmsg);
   cline=savecl;
   strcp(cfile,savecf);
-  return 0;
+}
+/* Undeclared identifiers (LANGUAGE.md section 5). A name with no visible
+   declaration compiles to the address of an external symbol of that name:
+   right for a function defined later or elsewhere, but a stray name -- a
+   block local used after its block, a typo, a global used before its
+   declaration -- links silently whenever some symbol of that name exists
+   (libc's `time`, say). A direct call stays quiet (an old-style external
+   call); any other use is noted here, once per name, at the name's own line,
+   and judged by chkundecl at the end of the unit, once every later
+   definition is known. */
+func noteundecl(nm:*char)
+{
+  var int:i;
+  for(i=0;i<nundecl;i++)if(strid(undecl[i].name,nm))return 0;
+  if(nundecl>=aundecl)
+  {
+    aundecl=aundecl+16;
+    chkmem(undecl=realloc(undecl,aundecl*sizeof(sundecl)));
+  }
+  strcp(undecl[nundecl].name,nm);
+  undecl[nundecl].line=cline;
+  strcp(undecl[nundecl].wfile,cfile);
+  nundecl++;
+  return 1;
+}
+func chkundecl()
+{
+  var int:i;
+  var *ssym:k;
+  for(i=0;i<nundecl;i++)
+  {
+    k=findglb(undecl[i].name);
+    if(!k)
+    warnat("undeclared identifier '",undecl[i].name,
+    "' (taken as the address of an external symbol)",undecl[i].line,undecl[i].wfile);
+    else if(k->sort!=S_FUNC)   /* the use took its address, not its value */
+    warnat("'",undecl[i].name,"' used before its declaration",
+    undecl[i].line,undecl[i].wfile);
+  }
 }
 func _zret()
 {
@@ -6087,8 +6136,15 @@ func hunary()
 func hsubscr()
 {
   var *enode:node,newnode;
+  var int:noted;
   node=primary();
+  /* an undeclared name is noted at its own line, before blanks() can move
+     on; followed by ( it is a direct call, so the note is withdrawn */
+  noted=0;
+  if(g_implfn)noted=noteundecl(node->name);
+  g_implfn=0;
   blanks();
+  if(noted&&streq(line+lptr,tlarg))nundecl--;
   if((ch()=='[')||
   streq(line+lptr,tlarg)
   ||(ch()=='.')
@@ -6274,6 +6330,7 @@ func primary()
       node->leaf.idx=k;
       k->wused=1;   /* referenced (unused-variable warning) */
       if(cnmlst)cnmlst->addm(nm);
+      if(k->sort==S_FUNC)g_implfn=1;   /* made implicit by an earlier use */
     }
     else if(k=findglb(nm))
     {
@@ -6293,6 +6350,7 @@ func primary()
       k->dfd=0;
       node->leaf.idx=k;
       if(cnmlst)cnmlst->addm(nm);
+      g_implfn=1;
     }
     return node;
   }
