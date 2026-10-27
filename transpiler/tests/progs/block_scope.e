@@ -1,9 +1,9 @@
 /* A plain { } block is a name scope: its locals die at the closing brace and
    their frame slots are reused, as for a control-flow body. Sibling blocks
    reuse names (with other types and sizes), inner blocks see outer names, and
-   break/continue/return leave a block with locals, also in an unbraced
-   function body. Returns the number of the
-   first failing check. -> 42 */
+   break/continue/return leave a block with locals; blocks directly inside an
+   unbraced function body are scopes too. Returns the number of the first
+   failing check. -> 42 */
 func sumsq(n:int)
 {
   var int:i,s;

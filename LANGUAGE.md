@@ -79,7 +79,7 @@ identifier-start  = "A" ... "Z" | "a" ... "z" | "_" ;
 identifier-continue = identifier-start | "0" ... "9" ;
 ```
 
-An identifier contains at most 15 characters. Identifiers are case-sensitive.
+An identifier contains at most 63 characters. Identifiers are case-sensitive.
 The following words have syntactic meaning and should not be used as ordinary
 identifiers:
 
@@ -261,6 +261,10 @@ itself do not close a separate scope. Once its scope has ended, a name no
 longer denotes the local: like any name with no visible declaration, it then
 denotes the address of an external symbol of that name (as a bare function
 name does), so a stray use fails at link time unless such a symbol exists.
+The compiler warns about any use of such a name other than a direct call,
+unless the unit defines or declares a function of that name somewhere; a use
+of a global variable or enum constant that precedes its declaration denotes
+the address, not the value, and is warned as used before its declaration.
 
 ## 6. Declarations
 
@@ -769,7 +773,7 @@ The version 0 implementation diagnoses or restricts the following:
 | Area | Limit |
 |---|---|
 | Physical source line | 158 bytes before newline |
-| Identifier | 15 characters |
+| Identifier | 63 characters |
 | Include nesting | 8 nested included files |
 | Resolved include path | 159 bytes (the including file's directory + the quoted name) |
 | Preprocessor macros | 299 definitions; 6000-byte shared name/body pool |
@@ -779,7 +783,7 @@ The version 0 implementation diagnoses or restricts the following:
 | `switch` | 256 case labels |
 | Active loops/switches | 74 |
 | Diagnostics | compilation stops after 30 errors |
-| Mangled method name | `Struct.method` must fit in 15 characters |
+| Mangled method name | `Struct.method` must fit in 63 characters |
 
 Additional ABI-dependent restrictions are:
 

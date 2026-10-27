@@ -31,8 +31,8 @@
 #define stfor 9
 #define stdo 10
 #define stswitch 11
-#define NAMESIZE 16
-#define NAMEMAX 15
+#define NAMESIZE 64 /* identifier storage: NAMEMAX characters + NUL */
+#define NAMEMAX 63  /* longest identifier, and longest Struct.method mangle */
 
 struct snamenode{
   [NAMESIZE]char name;
@@ -140,6 +140,14 @@ struct sdbgloc{
   int off;
   int promid;
 };
+
+/* a value use of an undeclared name, judged at the end of the unit (chkundecl) */
+struct sundecl{
+  [NAMESIZE]char name;
+  int line;
+  [FILESIZE]char wfile;
+};
+#define WMSGSIZE 160 /* a warning naming one identifier (warnat) */
 
 #define litstksz 30000
 #define litstknu 15

@@ -196,8 +196,9 @@ if [ -x "$LPP" ]; then
     echo "$out" | grep -q 'literal #define stays'  && ok "string literals preserved"        || bad "string literals"
     echo "$out" | grep -vq 'a comment'             && ok "comments stripped"                 || bad "comments stripped"
 
-    longid=abcdefghijklmnopq
-    printf '#define %s 1\n' "$longid" > "$TMPD/uplnc_pp_longid.e"
+    # identifiers hold up to 63 characters (NAMEMAX); a 64th is diagnosed
+    id63=$(printf '%063d' 0 | tr 0 a)
+    printf '#define %s 1\n' "${id63}b" > "$TMPD/uplnc_pp_longid.e"
     if "$LPP" "$TMPD/uplnc_pp_longid.e" > "$TMPD/uplnc_pp_longid.out" 2>"$TMPD/uplnc_pp_longid.err"; then
         bad "lpp1 long identifier exits nonzero"
     elif grep -q 'identifier too long' "$TMPD/uplnc_pp_longid.err"; then
@@ -205,6 +206,10 @@ if [ -x "$LPP" ]; then
     else
         bad "lpp1 long identifier diagnostic"
     fi
+    printf '#define %s 17\nreturn %s;\n' "$id63" "$id63" > "$TMPD/uplnc_pp_maxid.e"
+    "$LPP" "$TMPD/uplnc_pp_maxid.e" 2>/dev/null | grep -qx 'return 17;' \
+        && ok "lpp1 substitutes a 63-character macro name" \
+        || bad "lpp1 63-character macro name"
 
     longline=$(printf '%0170d' 0 | tr 0 ';')
     printf '%s\n' "$longline" > "$TMPD/uplnc_pp_longline.e"
@@ -528,8 +533,10 @@ EMPTYINIT
         bad "float literal pool overflow diagnostic"
     fi
 
-    longid=abcdefghijklmnopq
-    printf 'func main(){ var int:%s; return 0; }\n' "$longid" > "$TMPD/uplnc_long_ident.e"
+    # 63 characters is the limit (tests/progs/long_names.e uses it); a 64th
+    # is diagnosed, and so is a Struct.method mangle past 63 in total
+    id63=$(printf '%063d' 0 | tr 0 a)
+    printf 'func main(){ var int:%s; return 0; }\n' "${id63}b" > "$TMPD/uplnc_long_ident.e"
     if "$LANGC" -march=x86_64 > "$TMPD/uplnc_long_ident.s" 2>"$TMPD/uplnc_long_ident.err" \
             < "$TMPD/uplnc_long_ident.e"; then
         bad "long identifier exits nonzero"
@@ -537,6 +544,18 @@ EMPTYINIT
         ok "long identifier diagnosed"
     else
         bad "long identifier diagnostic"
+    fi
+    s31=$(printf '%031d' 0 | tr 0 s)
+    m32=$(printf '%032d' 0 | tr 0 m)
+    printf 'struct %s{int v; func %s;};\nmethod %s.%s(){return v;}\nfunc main(){return 0;}\n' \
+        "$s31" "$m32" "$s31" "$m32" > "$TMPD/uplnc_long_mangle.e"
+    if "$LANGC" -march=x86_64 > "$TMPD/uplnc_long_mangle.s" 2>"$TMPD/uplnc_long_mangle.err" \
+            < "$TMPD/uplnc_long_mangle.e"; then
+        bad "64-character method mangle exits nonzero"
+    elif grep -q 'method name too long' "$TMPD/uplnc_long_mangle.err"; then
+        ok "64-character method mangle diagnosed"
+    else
+        bad "64-character method mangle diagnostic"
     fi
 
     # The string-literal pool grows on demand (it was a fixed 16000 bytes):
@@ -745,6 +764,23 @@ EMPTYINIT
             || bad "block-scoped unused-variable warnings"
     else
         bad "block-scoped unused locals must not fail the compile"
+    fi
+
+    # Undeclared identifiers: a value use of a name with no declaration is a
+    # warning, once per name, judged at the end of the unit. A stray block
+    # local named like a libc symbol (time) would otherwise link silently.
+    # Calls to undeclared functions stay quiet (old-style external calls), as
+    # does a function used as a value before its definition (later); a global
+    # used before its declaration (glate) took its address and is flagged.
+    printf 'func main()\n{\n  {\n    var int:time;\n    time=7;\n  }\n  if(time==7)return 1;\n  if(time)return 2;\n  puts("x");\n  qsort(0,0,0,later);\n  return glate;\n}\nfunc later(){return 0;}\nvar int:glate;\n' > "$TMPD/uplnc_undecl.e"
+    if "$LPP" "$TMPD/uplnc_undecl.e" 2>/dev/null | "$LANGC" -march=x86_64 > "$TMPD/uplnc_undecl.s" 2>"$TMPD/uplnc_undecl.err"; then
+        grep -q ":7: Warning:undeclared identifier 'time'" "$TMPD/uplnc_undecl.err" \
+            && grep -q ":11: Warning:'glate' used before its declaration" "$TMPD/uplnc_undecl.err" \
+            && [ "$(grep -c 'Warning:' "$TMPD/uplnc_undecl.err")" = 2 ] \
+            && ok "value uses of undeclared names are warned, calls are not" \
+            || bad "undeclared-identifier warnings: $(tr '\n' '|' < "$TMPD/uplnc_undecl.err")"
+    else
+        bad "undeclared-identifier warnings must not fail the compile"
     fi
 
     # duplicate case labels must be diagnosed

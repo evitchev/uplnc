@@ -122,9 +122,10 @@ and other languages" reduces mostly to configuration.
 
 ## 6. Constraints it will hit (the dogfood value)
 
-- **15-char identifiers, and `Struct.method` mangles ≤ 15 total**
-  (LANGUAGE.md §14) — the first limit to hurt at 10k+ lines; may motivate
-  raising NAMESIZE (a fixpoint-affecting change to plan deliberately).
+- ~~**15-char identifiers, and `Struct.method` mangles ≤ 15 total**~~ —
+  raised (2026-10): identifiers and mangles now hold 63 characters
+  (LANGUAGE.md §14). The 158-byte source line is now the tighter bound on
+  long names.
 - ~~**16,000-byte string-literal pool per unit**~~ — removed preemptively
   (2026-08): the per-unit pool grows on demand, so an IDE full of UI text no
   longer hits a wall. Borland's own approach — help/UI text in external files
