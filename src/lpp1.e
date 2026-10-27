@@ -18,6 +18,8 @@
   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 #define MAXINC 10
+#define NAMESIZE 64 /* identifier storage, as in tlangc.he: NAMEMAX + NUL */
+#define NAMEMAX 63
 var extern stderr,stdin,stdout:*int;
 var ifil,ofil:*int;
 var ifiles:[MAXINC]*int;
@@ -79,7 +81,7 @@ func getnewstr()
 }
 func addmac()
 {
-  var [16]char:sname;
+  var [NAMESIZE]char:sname;
   var int:k,l;
   if(!symname(sname))
   {error("wrong macro name");return;}
@@ -122,7 +124,7 @@ func symname(sname:*char)
   if(!alpha(line[lptr]))return 0;
   for(k=l=too_long=0;an(line[lptr]);)
   {
-    if(k<15)
+    if(k<NAMEMAX)
     {sname[l++]=line[lptr++];k++;}
     else
     {too_long=1;k++;lptr++;}
@@ -261,7 +263,7 @@ func prep()
   lptr=0;
   while(line[lptr])
   {
-    var [16]char:sname;
+    var [NAMESIZE]char:sname;
     var int:k;
     if(isb(line[lptr]))
     {putres(' ');lptr++;}

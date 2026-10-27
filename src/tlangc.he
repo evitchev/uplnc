@@ -31,8 +31,8 @@
 #define stfor 9
 #define stdo 10
 #define stswitch 11
-#define NAMESIZE 16
-#define NAMEMAX 15
+#define NAMESIZE 64 /* identifier storage: NAMEMAX characters + NUL */
+#define NAMEMAX 63  /* longest identifier, and longest Struct.method mangle */
 
 struct snamenode{
   [NAMESIZE]char name;

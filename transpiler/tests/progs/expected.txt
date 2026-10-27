@@ -122,3 +122,4 @@ byte_ret 42
 struct_use 42
 struct_temp 42
 block_scope 42
+long_names 42

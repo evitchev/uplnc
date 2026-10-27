@@ -894,8 +894,9 @@ What turns a teaching compiler into something you'd build a project with:
     braced (`func f() switch(n){...}` parses its braces in `doswitch`, so blocks
     in its cases sat at depth 0 and were missed). Shadowing an enclosing
     local remains a `local multidef` error; a name used after its block falls
-    back to an external symbol (a link-time `undefined reference`), like any
-    undeclared name. The unused-variable warning moved into `warnunused()` and
+    back to an external symbol, like any undeclared name (now warned at
+    compile time; see *Undeclared identifiers* under M6 diagnostics). The
+    unused-variable warning moved into `warnunused()` and
     also runs when a scope closes, so block locals are warned — including
     control-flow-body locals, which were never checked before; the whole tree
     surfaced no new warnings. Only `langc.e`'s own output changes (its new
@@ -904,6 +905,21 @@ What turns a teaching compiler into something you'd build a project with:
     on all five targets, with and without `-g`, and all five fixpoints reach.
     `block_scope` golden test on all five backends, plus harness checks for
     shadowing, use after the block, and block-local warnings.
+  - ✅ **Identifiers up to 63 characters** (2026-10; was 15, the first limit
+    IDE.md expected to hurt at 10k+ lines). `NAMESIZE` 16 → 64 in
+    `tlangc.he`, and lpp1 gets the same `NAMESIZE`/`NAMEMAX` in place of its
+    hard-coded `[16]`/`15`, so every kind of name (locals, parameters,
+    globals, functions, macros, enum constants, struct types, fields) and the
+    `Struct.method` mangle may use 63 characters; a 64th is still diagnosed
+    ("identifier too long", "method name too long"). Every name buffer already
+    went through `NAMESIZE`, so the change is two headers; the compiler's own
+    symbol, type, field and expression-node records grow accordingly, which
+    changes only the toolchain's own assembly (`langc.e`, `grph.e`, `lpp1.e`:
+    struct offsets and sizes): every other unit and corpus program is
+    byte-identical on all five targets, and all five fixpoints reach. `long_names` golden test on all five backends (both
+    63-character limits, names sharing 15 or 62 leading characters); harness
+    checks pin the 63/64 boundary in lpp1 and langc and the mangle limit. The
+    158-byte source line is now the tighter bound on long names.
 - ✅ A written **language specification v0** — [`LANGUAGE.md`](LANGUAGE.md)
   defines the current preprocessor and lexical rules, prefix type grammar,
   target data models, declarations, functions and methods, control flow,
@@ -931,10 +947,10 @@ What turns a teaching compiler into something you'd build a project with:
     over the DWARF that `-g` emits (PRs #101–#114). A narrow C portability shim
     handles exact terminal restoration, C-width descriptor arrays/event polling,
     and the dedicated inferior PTY. This would be the largest UPLNC program yet
-    and the ultimate M7 dogfood; the constraints it will hit (15-char
-    identifiers/mangles, int-only indirect-call returns) are recorded there
-    as expected findings — the per-unit string pool wall was removed
-    preemptively (litq grows on demand).
+    and the ultimate M7 dogfood; the constraints it will hit (int-only
+    indirect-call returns; the 15-char identifier limit, since raised to 63)
+    are recorded there as expected findings — the per-unit string pool wall
+    was removed preemptively (litq grows on demand).
     - ✅ **Step 1, the platform + screen/input slice** (`ide/`, 2026-07):
       `tshim.c` keeps every C struct and bare C `int` on the C side of the
       boundary (intptr_t everywhere); `tui.e` provides raw mode with exact

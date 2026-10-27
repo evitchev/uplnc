@@ -79,7 +79,7 @@ identifier-start  = "A" ... "Z" | "a" ... "z" | "_" ;
 identifier-continue = identifier-start | "0" ... "9" ;
 ```
 
-An identifier contains at most 15 characters. Identifiers are case-sensitive.
+An identifier contains at most 63 characters. Identifiers are case-sensitive.
 The following words have syntactic meaning and should not be used as ordinary
 identifiers:
 
@@ -773,7 +773,7 @@ The version 0 implementation diagnoses or restricts the following:
 | Area | Limit |
 |---|---|
 | Physical source line | 158 bytes before newline |
-| Identifier | 15 characters |
+| Identifier | 63 characters |
 | Include nesting | 8 nested included files |
 | Resolved include path | 159 bytes (the including file's directory + the quoted name) |
 | Preprocessor macros | 299 definitions; 6000-byte shared name/body pool |
@@ -783,7 +783,7 @@ The version 0 implementation diagnoses or restricts the following:
 | `switch` | 256 case labels |
 | Active loops/switches | 74 |
 | Diagnostics | compilation stops after 30 errors |
-| Mangled method name | `Struct.method` must fit in 15 characters |
+| Mangled method name | `Struct.method` must fit in 63 characters |
 
 Additional ABI-dependent restrictions are:
 
