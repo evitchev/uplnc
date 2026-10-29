@@ -2541,6 +2541,22 @@ if [ -n "$TUIHOST" ] && command -v python3 >/dev/null \
     else
         bad "tui modified CSI key decoding"
     fi
+    # xterm's modifier parameter (1 + shift + 2*alt + 4*ctrl) reaches the
+    # program as K_SHIFT/K_ALT/K_CTRL added to the key, including the CSI
+    # form of F1-F4; tuidemo names the modifiers. One snapshot per key.
+    python3 tests/ptyrun.py "$TMPD/uplnc_tuidemo" 24x80 \
+        w:1b5b323b357e s w:1b5b31393b337e s w:1b5b313b3241 s w:1b5b313b3550 s \
+        w:1b5b313b3846 s w:71 > "$TMPD/uplnc_tui_mods.bin" 2>/dev/null
+    mods_ok=1
+    n=1
+    for want in 'key CTRL-INS' 'key ALT-F8' 'key SHIFT-UP' 'key CTRL-F1' \
+            'key CTRL-ALT-SHIFT-END'; do
+        python3 tests/screen.py 24x80 --snap $n < "$TMPD/uplnc_tui_mods.bin" \
+            | grep -q "$want" || mods_ok=0
+        n=$((n+1))
+    done
+    [ "$mods_ok" = 1 ] && ok "tui decodes Shift/Alt/Ctrl modifiers on special keys" \
+        || bad "tui modifier decoding"
     {
         printf 'func tuiinit();\nfunc tuidone();\n'
         printf 'func tuitext(x:int,y:int,s:*char,attr:int);\nfunc tuiflush();\n'

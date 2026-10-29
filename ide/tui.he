@@ -35,6 +35,13 @@
    K_ALT+'x'. Kept above every other code so a decoder switch cannot confuse
    the two. */
 #define K_ALT 512
+/* A special key (K_UP..K_EOF, all below K_ALT) arriving with modifiers adds
+   each one: Shift-Del is K_SHIFT+K_DEL, Ctrl-Ins K_CTRL+K_INS, Alt-F8
+   K_ALT+K_F8. Alt+byte stays below K_ALT+256 and a modified special at or
+   above K_ALT+256, so `k%K_ALT` is always the unmodified key. Ctrl+letter
+   arrives as its control byte (Ctrl-L is 12). */
+#define K_SHIFT 1024
+#define K_CTRL 2048
 
 /* attributes: PC-style, attr = fg + bg*16 (fg 0-15, 8-15 render bold;
    bg 0-7), plus A_ACS for the DEC line-drawing charset (box glyphs are

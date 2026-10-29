@@ -51,21 +51,39 @@ func drawall()
   return 0;
 }
 
+/* append s to nm at i; the new end */
+func kcat(nm:*char,i:int,s:*char)
+{
+  while(*s)nm[i++]=*s++;
+  nm[i]=0;
+  return i;
+}
 func showkey(k:int)
 {
-  var w:int;
+  var w,base,mods,i:int;
+  var [32]char:nm;
   w=tuicols();
   /* clear and flush first, so the name that follows re-emits every cell --
      the diff renderer would otherwise skip bytes shared with the previous
      name, and the PTY transcript greps want each name contiguous */
   tuifill(6,5,w-8,1,' ',text);
   tuiflush();
-  if(k>=K_ALT)                 /* Alt+key: never index knames with it */
+  base=k%K_ALT;                /* the key without its modifiers */
+  mods=k-base;
+  if((base<256)&&mods)         /* Alt+key: never index knames with it */
   {
     tuitext(6,5,"ALT-",hot);
-    tuiput(10,5,k-K_ALT,hot);
+    tuiput(10,5,base,hot);
   }
-  else if(k>=256)tuitext(6,5,knames[k-256],hot);
+  else if(base>=256)
+  {
+    i=0;
+    if(mods&K_CTRL)i=kcat(nm,i,"CTRL-");
+    if(mods&K_ALT)i=kcat(nm,i,"ALT-");
+    if(mods&K_SHIFT)i=kcat(nm,i,"SHIFT-");
+    kcat(nm,i,knames[base-256]);
+    tuitext(6,5,nm,hot);
+  }
   else if((k>32)&&(k<127))
   {
     tuiput(6,5,39,text);
