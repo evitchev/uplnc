@@ -14,6 +14,10 @@
 #include <poll.h>
 #include <signal.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
 
 static struct termios tsh_saved;
 static intptr_t tsh_have_saved = 0;
@@ -131,4 +135,74 @@ intptr_t tsh_pipe(intptr_t *fds)
 intptr_t tsh_close(intptr_t fd)
 {
     return close((int)fd) != 0 ? -1 : 0;
+}
+
+/* Run argv (argv[0] found on PATH) to completion for the IDE's build: stdin
+ * is /dev/null and stdout+stderr go to one pipe, so the child never touches
+ * the terminal the IDE holds in raw mode. Up to cap bytes of that output land
+ * in out (the rest is read and dropped, so the child cannot block on a full
+ * pipe) and *outn gets the count. Returns the exit status (0-255), 128+signal
+ * if the child was killed, 127 if it could not be executed, or -1 if it
+ * could not be started at all. */
+intptr_t tsh_run(char *const *argv, char *out, intptr_t cap, intptr_t *outn)
+{
+    int p[2], st, nul;
+    pid_t pid;
+    intptr_t n = 0;
+    *outn = 0;
+    if (pipe(p) != 0) return -1;
+    pid = fork();
+    if (pid < 0) {
+        close(p[0]);
+        close(p[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        static const char msg[] = "cannot run ";
+        nul = open("/dev/null", O_RDONLY);
+        if (nul > 0) {
+            dup2(nul, 0);
+            close(nul);
+        }
+        dup2(p[1], 1);
+        dup2(p[1], 2);
+        close(p[0]);
+        close(p[1]);
+        execvp(argv[0], argv);
+        /* exec failed: say so in the captured output, best effort */
+        (void)!write(2, msg, sizeof msg - 1);
+        (void)!write(2, argv[0], strlen(argv[0]));
+        (void)!write(2, "\n", 1);
+        _exit(127);
+    }
+    close(p[1]);
+    for (;;) {
+        char tmp[4096];
+        ssize_t r = read(p[0], tmp, sizeof tmp), i;
+        if (r < 0) {
+            if (errno == EINTR) continue;   /* a resize: keep draining */
+            break;
+        }
+        if (r == 0) break;
+        for (i = 0; i < r; i++)
+            if (n < cap) out[n++] = tmp[i];
+    }
+    close(p[0]);
+    while (waitpid(pid, &st, 0) < 0)
+        if (errno != EINTR) return -1;
+    *outn = n;
+    if (WIFEXITED(st)) return WEXITSTATUS(st);
+    if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
+    return -1;
+}
+
+/* the kernel's machine name (uname -m) into buf, NUL-terminated and
+ * truncated to fit; 0 ok, -1 error. Under qemu-user this is the guest's. */
+intptr_t tsh_machine(char *buf, intptr_t cap)
+{
+    struct utsname u;
+    if (cap < 1 || uname(&u) != 0) return -1;
+    strncpy(buf, u.machine, (size_t)cap - 1);
+    buf[cap - 1] = 0;
+    return 0;
 }
