@@ -65,3 +65,5 @@
 #define ACS_TR 'k'
 #define ACS_BL 'm'
 #define ACS_BR 'j'
+#define ACS_LTEE 't'
+#define ACS_RTEE 'u'

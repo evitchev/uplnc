@@ -991,6 +991,30 @@ What turns a teaching compiler into something you'd build a project with:
       failures prove the prior buffer/file survives. The editor rejects an
       existing path it cannot load and makes dirty F10 exits modal (F2 Save,
       F10 Discard, Esc Cancel); EOF attempts the same atomic save before exit.
+    - ✅ **Phase 1 slice 1b: menus, dialogs, search, blocks, and F9 build
+      with error jump** (`ide/menu.e`, `ide/build.e`, 2026-10), which
+      completes phase 1's list. Turbo's menu bar and pull-downs (File, Edit,
+      Search, Compile) open on F10 or Alt+letter; F10 is no longer quit, so
+      Alt-X is the quit key everywhere, including the dirty-exit prompt.
+      Dialogs: a one-line input with Turbo's preselected default, and a
+      message box. File Open (a modified buffer asks Yes/No/Cancel first)
+      and Save as; Find, Search again (Ctrl-L), Go to line; Shift+arrow
+      selection with Cut/Copy/Paste/Clear on Shift-Del/Ctrl-Ins/Shift-Ins/
+      Ctrl-Del and on the Edit menu. F9 saves and runs `perl langdrv.pl
+      -march=<host> -o <exe> <file>` through a new shim call, `tsh_run`
+      (fork/exec/waitpid; stdin /dev/null, stdout+stderr captured through
+      one pipe, so the child never sees the raw-mode terminal), lists the
+      output in a message pane, and lands on the first `<file>:<line>:`
+      location -- at langc's caret column when the echoed line still
+      matches, and in the `#include`d file when the error is there. Alt-F8/
+      Alt-F7 step through the errors. The key decoder learned xterm's
+      Shift/Alt/Ctrl modifier parameter. `shimtest.e` now also proves
+      `tsh_run` (output, exit status, a killed child, an unrunnable program,
+      truncation) and `tsh_machine` on every backend with a toolchain;
+      `[15]` drives menus, dialogs, selection, search, Open/Save as, and
+      real builds on a pseudo-terminal, asserting on open menus and dialogs
+      through a new snapshot mark in `ptyrun.py`/`screen.py`. Not yet:
+      multi-unit projects, Run (Ctrl-F9), undo, Replace (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array

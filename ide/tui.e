@@ -196,6 +196,22 @@ func tuifill(x:int,y:int,w:int,h:int,c:int,attr:int)
   return 0;
 }
 
+/* Turbo's drop shadow: the cells keep their glyphs but go dark grey on
+   black, so whatever lies under a menu or dialog still shows through */
+func tuishadow(x:int,y:int,w:int,h:int)
+{
+  var i,j,cell:int;
+  for(j=y;j<y+h;j++)
+  for(i=x;i<x+w;i++)
+  {
+    if((i<0)||(j<0)||(i>=tui_w)||(j>=tui_h))continue;
+    cell=tui_back[j*tui_w+i];
+    if((cell/256)>=A_ACS)tui_back[j*tui_w+i]=(cell&255)+256*(A_ACS+8);
+    else tui_back[j*tui_w+i]=(cell&255)+256*8;
+  }
+  return 0;
+}
+
 /* a single-line box in the DEC line-drawing charset */
 func tuibox(x:int,y:int,w:int,h:int,attr:int)
 {

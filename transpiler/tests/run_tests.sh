@@ -2672,13 +2672,13 @@ fi
 # compositor emits only changed cells, so after a scroll no whole line appears
 # contiguously in the stream even though the user plainly sees it.
 if [ -n "$TUIHOST" ] && command -v python3 >/dev/null \
-        && hostbuild "$TMPD/uplnc_ed" ../ide/ed.e ../ide/buf.e ../ide/tui.e \
-            ../ide/tshim.c >/dev/null 2>&1; then
+        && hostbuild "$TMPD/uplnc_ed" ../ide/ed.e ../ide/menu.e ../ide/build.e \
+            ../ide/buf.e ../ide/tui.e ../ide/tshim.c >/dev/null 2>&1; then
     printf 'alpha\nbeta\ngamma\n' > "$TMPD/uplnc_ed_edit.txt"
     # type X at the top, move to the end of the last line, open a new line,
-    # type "new", save with F2, quit with F10
+    # type "new", save with F2, quit with Alt-X
     python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_edit.txt" \
-        w:58 w:1b5b42 w:1b5b42 w:1b5b46 w:0d w:6e6577 w:1b4f51 p w:1b5b32317e \
+        w:58 w:1b5b42 w:1b5b42 w:1b5b46 w:0d w:6e6577 w:1b4f51 p w:1b78 \
         > "$TMPD/uplnc_ed_edit.bin" 2> "$TMPD/uplnc_ed_edit.err"
     printf 'Xalpha\nbeta\ngamma\nnew\n' > "$TMPD/uplnc_ed_edit.want"
     if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_edit.err" \
@@ -2690,7 +2690,7 @@ if [ -n "$TUIHOST" ] && command -v python3 >/dev/null \
     # Backspace at column 0 joins with the previous line.
     printf 'ab\ncd\n' > "$TMPD/uplnc_ed_join.txt"
     python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_join.txt" \
-        w:1b5b42 w:1b5b48 w:7f w:1b4f51 p w:1b5b32317e >/dev/null 2>&1
+        w:1b5b42 w:1b5b48 w:7f w:1b4f51 p w:1b78 >/dev/null 2>&1
     printf 'abcd\n' > "$TMPD/uplnc_ed_join.want"
     cmp -s "$TMPD/uplnc_ed_join.txt" "$TMPD/uplnc_ed_join.want" \
         && ok "editor joins lines with backspace at column 0" \
@@ -2702,7 +2702,7 @@ import sys
 open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
         "$TMPD/uplnc_ed_scroll.txt"
     python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_scroll.txt" \
-        w:1b5b367e w:1b5b367e p w:1b5b32317e 2>/dev/null \
+        w:1b5b367e w:1b5b367e p w:1b78 2>/dev/null \
         | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_scroll.screen"
     if grep -q '^line44$' "$TMPD/uplnc_ed_scroll.screen" \
             && grep -q '^line45$' "$TMPD/uplnc_ed_scroll.screen" \
@@ -2723,7 +2723,7 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
     # A file with no trailing newline gains one; the text is otherwise exact.
     printf 'one\ntwo' > "$TMPD/uplnc_ed_nl.txt"
     python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_nl.txt" \
-        w:1b4f51 p w:1b5b32317e >/dev/null 2>&1
+        w:1b4f51 p w:1b78 >/dev/null 2>&1
     printf 'one\ntwo\n' > "$TMPD/uplnc_ed_nl.want"
     cmp -s "$TMPD/uplnc_ed_nl.txt" "$TMPD/uplnc_ed_nl.want" \
         && ok "editor round-trips a file lacking its final newline" \
@@ -2736,11 +2736,10 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
         bad "editor load-error handling"
     fi
     # A quit request on a dirty buffer is modal. Escape cancels the first one;
-    # a later explicit discard leaves the on-disk file untouched. Both F10 and
-    # Alt-X reach this path, so the sequence below still drives it with F10.
+    # a later explicit discard leaves the on-disk file untouched.
     printf 'keep\n' > "$TMPD/uplnc_ed_quit.txt"
     python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_quit.txt" \
-        w:58 w:1b5b32317e p w:1b p w:59 w:1b5b32317e p w:1b5b32317e \
+        w:58 w:1b78 p w:1b p w:59 w:1b78 p w:1b78 \
         > "$TMPD/uplnc_ed_quit.bin" 2> "$TMPD/uplnc_ed_quit.err"
     python3 tests/screen.py 24x80 < "$TMPD/uplnc_ed_quit.bin" \
         > "$TMPD/uplnc_ed_quit.screen"
@@ -2755,20 +2754,165 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
         bad "editor dirty-quit confirmation"
     fi
     # F2 from that modal state saves atomically and returns to the editor; the
-    # following F10 then exits immediately because the buffer is clean.
+    # following Alt-X then exits immediately because the buffer is clean.
     printf 'keep\n' > "$TMPD/uplnc_ed_qsave.txt"
     python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_qsave.txt" \
-        w:58 w:1b5b32317e p w:1b4f51 p w:1b5b32317e \
+        w:58 w:1b78 p w:1b4f51 p w:1b78 \
         > "$TMPD/uplnc_ed_qsave.bin" 2> "$TMPD/uplnc_ed_qsave.err"
     python3 tests/screen.py 24x80 < "$TMPD/uplnc_ed_qsave.bin" \
         > "$TMPD/uplnc_ed_qsave.screen"
     printf 'Xkeep\n' > "$TMPD/uplnc_ed_qsave.want"
     if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_qsave.err" \
-            && grep -Eq 'F2 Save  Alt-X Quit +saved' "$TMPD/uplnc_ed_qsave.screen" \
+            && grep -Eq '^ L1 C2 +saved$' "$TMPD/uplnc_ed_qsave.screen" \
             && cmp -s "$TMPD/uplnc_ed_qsave.txt" "$TMPD/uplnc_ed_qsave.want"; then
         ok "editor can save from the dirty-quit confirmation"
     else
         bad "editor dirty-quit save"
+    fi
+    # --- phase 1: menus, dialogs, selection, search, open, build ---
+    # Keys as the terminal sends them: Alt-F/E/S = ESC f/e/s, Alt-X = ESC x,
+    # F2 = ESC O Q, F3 = ESC O R, F9 = CSI 20~, F10 = CSI 21~, Esc = ESC,
+    # Shift+arrow = CSI 1;2 A-D, Ctrl-Ins = CSI 2;5~, Shift-Ins = CSI 2;2~,
+    # Shift-Del = CSI 3;2~, Alt-F7/F8 = CSI 18;3~ / CSI 19;3~.
+    edhex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+    # Alt-F pulls down File; F10 opens the bar at File too, and Right moves
+    # on to Edit. Snapshots ('s') show each menu while it is open.
+    printf 'alpha\n' > "$TMPD/uplnc_ed_menu.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_menu.txt" \
+        w:1b66 s w:1b w:1b5b32317e w:1b5b43 s w:1b w:1b78 \
+        > "$TMPD/uplnc_ed_menu.bin" 2> "$TMPD/uplnc_ed_menu.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_menu.bin" \
+        > "$TMPD/uplnc_ed_menu1.screen"
+    python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_menu.bin" \
+        > "$TMPD/uplnc_ed_menu2.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_menu.err" \
+            && grep -q '^ *File  Edit  Search  Compile' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q 'x Open\.\.\. *F3 x' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q 'x Exit *Alt-X x' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q 'x Copy *Ctrl-Ins x' "$TMPD/uplnc_ed_menu2.screen" \
+            && ! grep -q 'Open\.\.\.' "$TMPD/uplnc_ed_menu2.screen"; then
+        ok "editor menus: Alt-F and F10 open them, Right moves along the bar"
+    else
+        bad "editor menus"
+    fi
+    # Search menu: Go to line 45, then Find "line50" (selected, the cursor
+    # after it), then Ctrl-L finds no second one.
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_scroll.txt" \
+        w:1b73 w:67 w:3435 w:0d s w:1b73 w:66 w:$(edhex line50) w:0d s w:0c s w:1b78 \
+        > "$TMPD/uplnc_ed_find.bin" 2>/dev/null
+    for n in 1 2 3; do
+        python3 tests/screen.py 24x80 --snap $n < "$TMPD/uplnc_ed_find.bin" \
+            > "$TMPD/uplnc_ed_find$n.screen"
+    done
+    if grep -q '^ L45 C1 ' "$TMPD/uplnc_ed_find1.screen" \
+            && grep -q '^ L51 C7 ' "$TMPD/uplnc_ed_find2.screen" \
+            && grep -q '^ L51 C7 *Search string not found' "$TMPD/uplnc_ed_find3.screen"; then
+        ok "editor goes to a line, finds text, and repeats the search"
+    else
+        bad "editor go-to-line / find"
+    fi
+    # Shift+Right x3 selects "alp", Ctrl-Ins copies, Shift-Ins pastes it at
+    # the end of line 2; then Shift+Down/Right selects "betaalp\ng" and
+    # Shift-Del cuts it. F2 saves.
+    printf 'alpha\nbeta\ngamma\n' > "$TMPD/uplnc_ed_sel.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_sel.txt" \
+        w:1b5b313b3243 w:1b5b313b3243 w:1b5b313b3243 w:1b5b323b357e \
+        w:1b5b42 w:1b5b46 w:1b5b323b327e s w:1b5b48 w:1b5b313b3242 \
+        w:1b5b313b3243 w:1b5b333b327e w:1b4f51 p w:1b78 \
+        > "$TMPD/uplnc_ed_sel.bin" 2>/dev/null
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_sel.bin" \
+        > "$TMPD/uplnc_ed_sel.screen"
+    printf 'alpha\namma\n' > "$TMPD/uplnc_ed_sel.want"
+    if grep -q '^betaalp$' "$TMPD/uplnc_ed_sel.screen" \
+            && cmp -s "$TMPD/uplnc_ed_sel.txt" "$TMPD/uplnc_ed_sel.want"; then
+        ok "editor selects with Shift+arrows; copies, pastes, and cuts blocks"
+    else
+        bad "editor selection and clipboard"
+    fi
+    # The Edit menu's Copy/Paste across lines, then File/Save as: typing
+    # replaces the preselected name, and the original file is untouched.
+    printf 'one\ntwo\nthree\n' > "$TMPD/uplnc_ed_saveas.txt"
+    rm -f "$TMPD/uplnc_ed_saveas2.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_saveas.txt" \
+        w:1b5b42 w:1b5b313b3242 w:1b65 w:63 w:1b5b46 w:1b5b42 w:1b5b46 w:0d \
+        w:1b65 w:70 w:1b66 w:61 w:$(edhex "$TMPD/uplnc_ed_saveas2.txt") w:0d \
+        p w:1b78 > /dev/null 2> "$TMPD/uplnc_ed_saveas.err"
+    printf 'one\ntwo\nthree\ntwo\n\n' > "$TMPD/uplnc_ed_saveas.want"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_saveas.err" \
+            && cmp -s "$TMPD/uplnc_ed_saveas2.txt" "$TMPD/uplnc_ed_saveas.want" \
+            && [ "$(cat "$TMPD/uplnc_ed_saveas.txt")" = "$(printf 'one\ntwo\nthree')" ]; then
+        ok "editor Edit-menu copy/paste and File/Save as"
+    else
+        bad "editor Save as"
+    fi
+    # F3 on a modified buffer asks first: Esc stays put, Y saves and then
+    # the named file is opened.
+    printf 'first\n' > "$TMPD/uplnc_ed_open1.txt"
+    printf 'second\n' > "$TMPD/uplnc_ed_open2.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_open1.txt" \
+        w:58 w:1b4f52 s w:1b w:1b4f52 w:79 w:$(edhex "$TMPD/uplnc_ed_open2.txt") \
+        w:0d s w:1b78 > "$TMPD/uplnc_ed_open.bin" 2> "$TMPD/uplnc_ed_open.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_open.bin" \
+        > "$TMPD/uplnc_ed_open1.screen"
+    python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_open.bin" \
+        > "$TMPD/uplnc_ed_open2.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_open.err" \
+            && grep -q 'unsaved changes' "$TMPD/uplnc_ed_open1.screen" \
+            && grep -q '^second$' "$TMPD/uplnc_ed_open2.screen" \
+            && [ "$(cat "$TMPD/uplnc_ed_open1.txt")" = Xfirst ]; then
+        ok "editor F3 asks before leaving a modified file, then opens"
+    else
+        bad "editor F3 open"
+    fi
+    # F9 builds through the driver. These assert on the final screen (Alt-X
+    # leaves a clean buffer without repainting), so a slow build cannot
+    # race a snapshot. Two errors: the first is landed on at langc's caret
+    # column, Alt-F8 steps to the second, and Alt-F7 back.
+    printf 'func main()\n{\n  var int:x;\n  x=1;\n  x=x+;\n  return x;\n}\nfunc g()\n{\n  return 1+;\n}\n' \
+        > "$TMPD/uplnc_ed_bad.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_bad.e" w:1b5b32307e p w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_bad1.screen"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_bad.e" w:1b5b32307e w:1b5b31393b337e p w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_bad2.screen"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_bad.e" w:1b5b32307e w:1b5b31393b337e w:1b5b31393b337e \
+        w:1b5b31383b337e p w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_bad3.screen"
+    if grep -q '^ L5 C7  *uplnc_ed_bad\.e:5: Error:wrong expression' "$TMPD/uplnc_ed_bad1.screen" \
+            && grep -q ' Messages ' "$TMPD/uplnc_ed_bad1.screen" \
+            && grep -q '^ uplnc_ed_bad\.e:10: Error:wrong expression' "$TMPD/uplnc_ed_bad1.screen" \
+            && grep -q '^ L10 C12  *uplnc_ed_bad\.e:10:' "$TMPD/uplnc_ed_bad2.screen" \
+            && grep -q '^ L5 C7  *uplnc_ed_bad\.e:5:' "$TMPD/uplnc_ed_bad3.screen"; then
+        ok "editor F9 lands on the first error; Alt-F8/Alt-F7 step through them"
+    else
+        bad "editor build error navigation"
+    fi
+    # An error inside an #include'd file opens that file at the error.
+    printf 'func helper()\n{\n  return 1+;\n}\n' > "$TMPD/uplnc_ed_inc.he"
+    printf '#include "uplnc_ed_inc.he"\nfunc main()\n{\n  return helper();\n}\n' \
+        > "$TMPD/uplnc_ed_incmain.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_incmain.e" w:1b5b32307e p w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_inc.screen"
+    if grep -q '^func helper()$' "$TMPD/uplnc_ed_inc.screen" \
+            && grep -q '^ L3 C12  *uplnc_ed_inc\.he:3:' "$TMPD/uplnc_ed_inc.screen"; then
+        ok "editor jumps into the included file an error is in"
+    else
+        bad "editor include-file error jump"
+    fi
+    # A clean build reports success and leaves the program beside the source.
+    printf 'func main()\n{\n  return 42;\n}\n' > "$TMPD/uplnc_ed_good.e"
+    rm -f "$TMPD/uplnc_ed_good"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_good.e" w:1b5b32307e p w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_good.screen"
+    if grep -q '^ L1 C1  *Build OK' "$TMPD/uplnc_ed_good.screen" \
+            && { "$TMPD/uplnc_ed_good"; [ $? = 42 ]; }; then
+        ok "editor F9 builds a clean program that runs"
+    else
+        bad "editor clean build"
     fi
 else
     echo "  skip - editor tests need python3 and a native build"
