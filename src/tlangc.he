@@ -17,9 +17,8 @@
 */
 #define WORDSIZE 4
 #define BYTESIZE 1
-#define linesize 180
+#define linesize 1024 /* a source line: linemax bytes + NUL, as lpp1's LINESIZE */
 #define linemax linesize-1
-#define mpmax linemax
 #define FILESIZE 160 /* source names carried by lpp1 line markers */
 #define stif 1
 #define stwhile 2

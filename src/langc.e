@@ -245,9 +245,7 @@ var g_vaoff:int;      /* varargs: frame offset of this function's va area (0 = n
 var g_stmtexp:int;    /* set by statemen for a bare expression statement (no-effect warning) */
 var g_stmtclosed:int; /* the current statement consumed its ; or closing } */
 var g_fnbody:int;     /* the next statement is a function's own body (dofunc) */
-var mline:[linesize]char;
 var lptr:int;
-var mptr:int;
 var nextlab:int;
 func getlabel()
 {
@@ -1393,15 +1391,24 @@ func ch()
 func insline()
 {
   var int:k;
-  var int:n,i;
+  var int:n,i,longline;
   while(1)
   {
     if(!isinp)iseof=1;
     if(iseof)return ;
     lptr=0;
     line[0]=0;
+    longline=0;
     while((k=getchar())>0){
-      if((k==10)||(lptr>=linemax))break;
+      if(k==10)break;
+      if(lptr>=linemax)
+      {
+        /* only raw input gets here (lpp1 diagnoses its own long lines):
+           drop the rest rather than split it into a bogus next line */
+        longline=1;
+        while((k=getchar())>0)if(k==10)break;
+        break;
+      }
       line[lptr++]=k;
     }
     line[lptr]=0;
@@ -1432,6 +1439,7 @@ func insline()
       lptr=0;
     }
     cline++;
+    if(longline)error("input line too long");
     return ;
   }
 }

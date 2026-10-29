@@ -211,7 +211,8 @@ if [ -x "$LPP" ]; then
         && ok "lpp1 substitutes a 63-character macro name" \
         || bad "lpp1 63-character macro name"
 
-    longline=$(printf '%0170d' 0 | tr 0 ';')
+    # a physical line holds 1023 bytes (LINEMAX); a 1024th is diagnosed
+    longline=$(printf '%01024d' 0 | tr 0 ';')
     printf '%s\n' "$longline" > "$TMPD/uplnc_pp_longline.e"
     if "$LPP" "$TMPD/uplnc_pp_longline.e" > "$TMPD/uplnc_pp_longline.out" 2>"$TMPD/uplnc_pp_longline.err"; then
         bad "lpp1 long line exits nonzero"
@@ -545,6 +546,18 @@ EMPTYINIT
     else
         bad "long identifier diagnostic"
     fi
+    # raw input (no lpp1) gets the same 1023-byte line limit: an over-long
+    # line is one diagnostic on its own line, not silently split in two
+    printf 'func main()\n{\n  return 0;%1030s\n}\n' '' > "$TMPD/uplnc_long_line.e"
+    if "$LANGC" -march=x86_64 > "$TMPD/uplnc_long_line.s" 2>"$TMPD/uplnc_long_line.err" \
+            < "$TMPD/uplnc_long_line.e"; then
+        bad "langc long raw line exits nonzero"
+    elif grep -q 'line 3: Error:input line too long' "$TMPD/uplnc_long_line.err" \
+            && [ "$(grep -c 'Error:' "$TMPD/uplnc_long_line.err")" = 1 ]; then
+        ok "langc long raw line diagnosed once, on its own line"
+    else
+        bad "langc long raw line diagnostic"
+    fi
     s31=$(printf '%031d' 0 | tr 0 s)
     m32=$(printf '%032d' 0 | tr 0 m)
     printf 'struct %s{int v; func %s;};\nmethod %s.%s(){return v;}\nfunc main(){return 0;}\n' \
@@ -593,6 +606,33 @@ EMPTYINIT
         ok "the string-literal pool grows past the old 16KB limit (compile-only)"
     else
         bad "string-literal pool growth"
+    fi
+
+    # 1023-byte lines and a growing macro table (it was a fixed 299 entries
+    # in a 6000-byte pool): 600 macros, a 1023-byte #define, and a 1023-byte
+    # line that reaches langc unchanged, all computing one checked value
+    {
+        for i in $(seq 1 600); do printf '#define K%d %d\n' "$i" "$i"; done
+        printf '#define SEVENS %s\n' "$(printf '+7%.0s' $(seq 504))"
+        printf 'func main()\n{\n  var int:t;\n  t=0;\n'
+        printf '  t=t%s ;\n' "$(printf '+7%.0s' $(seq 508))"
+        printf '  t=t SEVENS;\n  t=t+K1+K600;\n'
+        printf '  if(t==7685)return 42;\n  return 1;\n}\n'
+    } > "$TMPD/uplnc_long_lines.e"
+    if [ -n "$poolarch" ]; then
+        if perl "$DRIVER" "-march=$poolarch" -o "$TMPD/uplnc_long_lines_bin" \
+                "$TMPD/uplnc_long_lines.e" >/dev/null 2>&1 \
+                && "$TMPD/uplnc_long_lines_bin"; [ $? = 42 ]; then
+            ok "1023-byte lines and 600 macros compile and run"
+        else
+            bad "1023-byte lines and macro table growth"
+        fi
+    elif "$LPP" "$TMPD/uplnc_long_lines.e" 2>/dev/null \
+            | "$LANGC" -march=x86_64 > "$TMPD/uplnc_long_lines.s" 2>&1 \
+            && ! grep -q 'Error' "$TMPD/uplnc_long_lines.s"; then
+        ok "1023-byte lines and 600 macros compile (compile-only)"
+    else
+        bad "1023-byte lines and macro table growth"
     fi
 
     printf 'func main(){return 0;} /* unterminated\n' > "$TMPD/uplnc_bad_comment.e"
@@ -1741,11 +1781,11 @@ else
         else
             echo "  skip - format gate needs a git checkout"
         fi
-        # a line that overflows 158 bytes after formatting warns and exits 1
-        printf 'func f()\n{\n  var int:%s;\n}\n' "$(python3 -c 'print("x"*155)')" \
+        # a line that overflows 1023 bytes after formatting warns and exits 1
+        printf 'func f()\n{\n  var int:%s;\n}\n' "$(python3 -c 'print("x"*1020)')" \
             > "$TMPD/uplnc_fmt_long.e"
         timeout 5 "$FMT" "$TMPD/uplnc_fmt_long.e" >/dev/null 2>"$TMPD/uplnc_fmt_long.err"
-        [ "$?" = 1 ] && grep -q 'exceeds 158 bytes' "$TMPD/uplnc_fmt_long.err" \
+        [ "$?" = 1 ] && grep -q 'exceeds 1023 bytes' "$TMPD/uplnc_fmt_long.err" \
             && ok "uplncfmt warns and exits 1 on an over-long formatted line" \
             || bad "uplncfmt overlong-line warning"
         # Physical lines are not capped by an internal scratch buffer. The

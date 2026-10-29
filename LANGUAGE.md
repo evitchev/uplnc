@@ -772,11 +772,11 @@ The version 0 implementation diagnoses or restricts the following:
 
 | Area | Limit |
 |---|---|
-| Physical source line | 158 bytes before newline |
+| Physical source line | 1023 bytes before newline |
 | Identifier | 63 characters |
 | Include nesting | 8 nested included files |
 | Resolved include path | 159 bytes (the including file's directory + the quoted name) |
-| Preprocessor macros | 299 definitions; 6000-byte shared name/body pool |
+| Preprocessor macros | no fixed count (the table grows on demand); a definition is one line |
 | String literals | no fixed limit (the per-unit pool grows on demand) |
 | Floating and wide literals | 200 entries and a 4000-byte text pool per unit |
 | Numeric token | 47 characters |

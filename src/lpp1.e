@@ -20,6 +20,8 @@
 #define MAXINC 10
 #define NAMESIZE 64 /* identifier storage, as in tlangc.he: NAMEMAX + NUL */
 #define NAMEMAX 63
+#define LINESIZE 1024 /* a source line: LINEMAX bytes + NUL, as tlangc.he's linesize */
+#define LINEMAX 1023
 var extern stderr,stdin,stdout:*int;
 var ifil,ofil:*int;
 var ifiles:[MAXINC]*int;
@@ -28,17 +30,15 @@ var ifiles:[MAXINC]*int;
 var ilines:[MAXINC]int;
 var inamebuf:[1600]char;  /* MAXINC paths, 160 bytes each (matches include path) */
 var iptr:int;
-var line,rline:[160]char;
+var line,rline:[LINESIZE]char;
 var lptr,rlptr:int;
 var isinp,iseof:int;
 var errcnt:int;
-/* macro name+body pool: the compiler's own headers (tlangc.he + codegen.he
-   #defines) live here when self-preprocessing, so grow it with the opcode set */
-var strpool:[6000]char;
-var strptr:int;
+/* the macro table grows on demand (addmac); each name and body is its own
+   allocation. Entry 0 is unused: findmac returns 0 for "not a macro". */
 struct cmac{*char n; *char sub;};
-var mactab:[300]cmac;
-var macptr:int;
+var mactab:*cmac;
+var macptr,maccap:int;
 func strcp(d:*char,s:*char)
 {
   while(*d++=*s++);
@@ -53,52 +53,56 @@ func gch()
 }
 func putres(c:int)
 {
-  if(rlptr>=159)
+  if(rlptr>=LINEMAX)
   {
-    rline[159]=0;
+    rline[LINEMAX]=0;
     if(c)error("output buffer overflow");
     return 0;
   }
   return rline[rlptr++]=c;
 }
-func putmac(c:int)
+func chkmem(p:*char)
 {
-  /*fprintf(stderr,"putmac:c=%d\n",c);*/
-  if(strptr>=5999)
+  if(!p)
   {
-    strpool[5999]=0;
-    strptr=6000;
-    if(c)error("string pool full");
-    return 0;
+    fprintf(stderr,"lpp1: out of memory\n");
+    exit(1);
   }
-  return strpool[strptr++]=c;
+  return p;
 }
-func getnewstr()
+func savestr(s:*char)   /* a heap copy of s */
 {
-  if(strptr>5999)
-  {error("getnewstr:string pool full");return 0;}
-  return strptr;
+  var *char:p;
+  p=chkmem(malloc(strlen(s)+1));
+  strcp(p,s);
+  return p;
 }
 func addmac()
 {
   var [NAMESIZE]char:sname;
-  var int:k,l;
   if(!symname(sname))
   {error("wrong macro name");return;}
-  if(macptr>=299)
-  {error("mactab full");return;}
   sb();
-  k=getnewstr();
-  mactab[macptr].n=strpool+k;
-  l=0;
-  while(putmac(sname[l++]))
-  ;
-  k=getnewstr();
-  mactab[macptr].sub=strpool+k;
-  while(putmac(line[lptr++]));
+  if(macptr>=maccap)
+  {
+    maccap=maccap+64;
+    mactab=chkmem(realloc(mactab,maccap*sizeof(cmac)));
+  }
+  mactab[macptr].n=savestr(sname);
+  mactab[macptr].sub=savestr(line+lptr);
   /*fprintf(stderr,"macro name=%s, sub=%s\n",mactab[macptr].n,
       mactab[macptr].sub);*/
   macptr++;
+}
+func freemacs()
+{
+  var int:i;
+  for(i=1;i<macptr;i++)
+  {
+    free(mactab[i].n);
+    free(mactab[i].sub);
+  }
+  if(mactab)free(mactab);
 }
 func strid(str1:*char,str2:*char)
 {
@@ -188,7 +192,7 @@ func insline()
   {
     if(k==10)
     {break;}
-    if(lptr>=158)
+    if(lptr>=LINEMAX)
     {
       longline=1;
       while((k=fgetc(ifil))>0)if(k==10)break;
@@ -457,8 +461,9 @@ func main(argc:int,argv:**char)
 {
   var int:i,is_out,is_in;
   var *char: outn,inn;
-  strptr=0;
   macptr=1;
+  maccap=0;
+  mactab=0;
   errcnt=0;
   iseof=0;
   isinp=1;
@@ -497,6 +502,7 @@ func main(argc:int,argv:**char)
 
   if(inn)fclose(ifil);
   if(outn)fclose(ofil);
+  freemacs();
   if(errcnt)return 1;
   return 0;
 }

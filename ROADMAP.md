@@ -916,10 +916,25 @@ What turns a teaching compiler into something you'd build a project with:
     symbol, type, field and expression-node records grow accordingly, which
     changes only the toolchain's own assembly (`langc.e`, `grph.e`, `lpp1.e`:
     struct offsets and sizes): every other unit and corpus program is
-    byte-identical on all five targets, and all five fixpoints reach. `long_names` golden test on all five backends (both
-    63-character limits, names sharing 15 or 62 leading characters); harness
-    checks pin the 63/64 boundary in lpp1 and langc and the mangle limit. The
-    158-byte source line is now the tighter bound on long names.
+    byte-identical on all five targets, and all five fixpoints reach.
+    `long_names` golden test on all five backends (both 63-character limits,
+    names sharing 15 or 62 leading characters); harness checks pin the 63/64
+    boundary in lpp1 and langc and the mangle limit.
+  - ✅ **1023-byte source lines and a growing macro table** (2026-10). The
+    158-byte line had become the tighter bound on long names (two 63-character
+    names and little else). lpp1's line and output buffers and langc's
+    `linesize` go to 1024 (`LINEMAX` 1023 bytes before the newline; a longer
+    line is still diagnosed). langc on raw input (no lpp1) used to split an
+    over-long line silently, so its tail parsed as a bogus next line ("missing
+    ';'"); it now reports "input line too long" once, on that line. lpp1's
+    macro table, a fixed 299 entries in a 6000-byte pool that the compiler's
+    own headers had filled to 275, now grows on demand, each name and body its
+    own allocation. `uplncfmt` warns at the new limit. Only the toolchain's
+    own assembly changes (`langc.e`, `lpp1.e`); every other unit and corpus
+    program is byte-identical on all five targets, and all five fixpoints
+    reach. Harness checks pin the 1023/1024 boundary in lpp1 and in raw langc,
+    and a generated program with 600 macros, a 1023-byte `#define`, and a
+    1023-byte line runs natively.
 - ✅ A written **language specification v0** — [`LANGUAGE.md`](LANGUAGE.md)
   defines the current preprocessor and lexical rules, prefix type grammar,
   target data models, declarations, functions and methods, control flow,
@@ -1077,7 +1092,8 @@ What turns a teaching compiler into something you'd build a project with:
     strings, char literals, and comments — a single scan tracks that state),
     strips trailing whitespace, pins `#`/`%%` directives to column zero, leaves
     multi-line-comment interiors verbatim, and warns (exit 1) rather than
-    emitting a line past `lpp1`'s 158-byte limit. It is idempotent; reads
+    emitting a line past `lpp1`'s line limit (`LINEMAX`, 1023 bytes since
+    2026-10; 158 before). It is idempotent; reads
     stdin or files; `-w` rewrites atomically. **Proof:** formatting all ~140
     `.e`/`.he` sources yields identical machine code (differences appear only
     in langc's `#:` source-echo comments, discarded at assembly), and a

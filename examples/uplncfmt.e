@@ -6,7 +6,7 @@
    are only counted outside strings, character literals, and comments, so the
    output is semantics-preserving by construction -- lpp1 discards exactly the
    whitespace this tool rearranges. The formatter is idempotent. When
-   canonical indentation would push a line past lpp1's 158-byte limit, the
+   canonical indentation would push a line past lpp1's 1023-byte limit, the
    line keeps its original indentation instead of being pushed further over;
    if it still exceeds the limit, that is reported and the exit status is 1
    (the build would otherwise break). Reads stdin or named files to stdout;
@@ -41,7 +41,7 @@ func realpath(n:*char,resolved:*char):*char;
 func statx(dirfd:int,n:*char,flags:int,mask:int,buf:*char);
 var extern stderr,stdin,stdout:*int;
 
-#define MAXLINE 158
+#define MAXLINE 1023 /* lpp1's LINEMAX */
 #define STATX_MODE 2
 #define AT_FDCWD -100
 
