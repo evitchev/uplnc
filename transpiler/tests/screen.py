@@ -1,11 +1,20 @@
 # Replay a terminal byte stream into a screen model and print the final grid.
 # Understands what ide/tui.e emits: CSI row;colH, CSI 2J, SGR (ignored for
 # content), the DEC charset shifts, and printable bytes.
+#
+#   screen.py ROWSxCOLS [--snap N]
+#
+# --snap N replays only up to ptyrun.py's Nth snapshot mark (1-based), to see
+# a screen in the middle of a session; otherwise the marks are ignored.
 import sys, re
 rows, cols = (int(x) for x in sys.argv[1].split('x'))
 g = [[' ']*cols for _ in range(rows)]
 cy = cx = 0
 data = sys.stdin.buffer.read()
+SNAP = b'\x00SNAP\x00'
+if len(sys.argv) > 3 and sys.argv[2] == '--snap':
+    data = SNAP.join(data.split(SNAP)[:int(sys.argv[3])])
+data = data.replace(SNAP, b'')
 i = 0
 while i < len(data):
     c = data[i]

@@ -2,11 +2,12 @@
 # of events, and write everything it printed to stdout; the exit status and
 # whether the termios state was restored exactly go to stderr.
 #
-#   ptyrun.py BIN ROWSxCOLS [a:ARG ...] [w:HEXBYTES | p | z:ROWSxCOLS ...]
+#   ptyrun.py BIN ROWSxCOLS [a:ARG ...] [w:HEXBYTES | p | s | z:ROWSxCOLS ...]
 #
 #     a:ARG   pass ARG to the program (before any event)
 #     w:HEX   write these bytes to its terminal, then let it settle
 #     p       just let it settle
+#     s       mark a snapshot point in the output (see screen.py --snap)
 #     z:RxC   resize the terminal and deliver SIGWINCH
 #
 # Pipe the stdout through screen.py to assert on what a user would see.
@@ -20,6 +21,7 @@ args = [binpath] + [a[2:] for a in sys.argv[3:] if a.startswith('a:')]
 ops = [a for a in sys.argv[3:] if not a.startswith('a:')]
 p = subprocess.Popen(args, stdin=s, stdout=s, stderr=s, start_new_session=True)
 out = b''
+SNAP = b'\x00SNAP\x00'   # never emitted by a program: NUL is not drawn
 def drain(t=0.35):
     global out
     end = time.time()+t
@@ -34,6 +36,9 @@ for op in ops:
         os.write(m, bytes.fromhex(op[2:])); drain()
     elif op == 'p':
         drain(0.3)
+    elif op == 's':
+        drain(0.3)
+        out += SNAP
     elif op.startswith('z:'):
         r,c = map(int, op[2:].split('x'))
         fcntl.ioctl(m, termios.TIOCSWINSZ, struct.pack('HHHH', r, c, 0, 0))
