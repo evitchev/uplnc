@@ -1020,7 +1020,9 @@ What turns a teaching compiler into something you'd build a project with:
       where a step ends (one command, or a run of typing, Backspaces, or
       Dels), and undoing back to the saved text leaves the buffer clean.
       Alt-Backspace undoes, Redo is on the Edit menu; `buftest.e` proves both
-      on all five backends. Still to come: Replace, multi-unit projects, Run
+      on all five backends. **Replace** stops at each match with a status-
+      line question (Y / N / All / Esc), is one undo step as a whole, and is
+      what Ctrl-L repeats after it. Still to come: multi-unit projects, Run
       (Ctrl-F9) (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed

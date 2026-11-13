@@ -2954,6 +2954,40 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
     else
         bad "editor undo to a clean buffer"
     fi
+    # Search/Replace asks for both texts, then stops at each match with the
+    # question on the status line: Y replaces, N skips, A does the rest.
+    printf 'foo bar foo\nfoo\nx foo\n' > "$TMPD/uplnc_ed_repl.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_repl.txt" \
+        w:1b73 w:72 w:$(edhex foo) w:0d w:$(edhex qux) w:0d s w:79 w:6e w:61 s \
+        w:1b4f51 p w:1b78 > "$TMPD/uplnc_ed_repl.bin" 2> "$TMPD/uplnc_ed_repl.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_repl.bin" \
+        > "$TMPD/uplnc_ed_repl1.screen"
+    python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_repl.bin" \
+        > "$TMPD/uplnc_ed_repl2.screen"
+    printf 'qux bar foo\nqux\nx qux\n' > "$TMPD/uplnc_ed_repl.want"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_repl.err" \
+            && grep -q '^ L1 C4  *Replace this occurrence?' "$TMPD/uplnc_ed_repl1.screen" \
+            && grep -q '^ L3 C6  *3 occurrences replaced' "$TMPD/uplnc_ed_repl2.screen" \
+            && cmp -s "$TMPD/uplnc_ed_repl.txt" "$TMPD/uplnc_ed_repl.want"; then
+        ok "editor replaces with Y/N/All answers at each match"
+    else
+        bad "editor Replace"
+    fi
+    # A whole Replace is one undo step, and Ctrl-L repeats the Replace, not a
+    # Find: after undoing "All", Y then Esc replaces just the first again.
+    printf 'a1 a2\n' > "$TMPD/uplnc_ed_repl2.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_repl2.txt" \
+        w:1b73 w:72 w:61 w:0d w:62 w:0d w:61 w:1b7f w:0c w:79 w:1b s \
+        w:1b4f51 p w:1b78 > "$TMPD/uplnc_ed_repl2.bin" 2> "$TMPD/uplnc_ed_repl2.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_repl2.bin" \
+        > "$TMPD/uplnc_ed_repl3.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_repl2.err" \
+            && grep -q '^ L1 C5  *1 occurrence replaced' "$TMPD/uplnc_ed_repl3.screen" \
+            && [ "$(cat "$TMPD/uplnc_ed_repl2.txt")" = "b1 a2" ]; then
+        ok "editor undoes a whole Replace at once; Ctrl-L repeats it"
+    else
+        bad "editor Replace undo / repeat"
+    fi
 else
     echo "  skip - editor tests need python3 and a native build"
 fi

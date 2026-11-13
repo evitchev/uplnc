@@ -4,13 +4,13 @@
    Keys: arrows/Home/End/PgUp/PgDn move (with Shift they select), printable
    keys and Enter/Backspace/Del edit (Tab enters two spaces; typing over a
    selection replaces it), F2 saves, F3 opens, F9 builds, Alt-F7/Alt-F8 step
-   through the build's errors, Ctrl-L repeats the last search, Shift-Del /
-   Ctrl-Ins / Shift-Ins / Ctrl-Del cut, copy, paste and clear, Alt-Backspace
-   undoes, Esc closes the message pane, F10 or Alt+a menu letter opens the
-   menus (Alt-F, Alt-E, Alt-S, Alt-C), and Alt-X quits. Every command is also
-   on a menu, because terminal emulators keep some of those keys for
-   themselves (MATE Terminal opens its own menu bar on F10; many paste on
-   Shift-Ins).
+   through the build's errors, Ctrl-L repeats the last Find or Replace,
+   Shift-Del / Ctrl-Ins / Shift-Ins / Ctrl-Del cut, copy, paste and clear,
+   Alt-Backspace undoes, Esc closes the message pane, F10 or Alt+a menu
+   letter opens the menus (Alt-F, Alt-E, Alt-S, Alt-C), and Alt-X quits.
+   Every command is also on a menu, because terminal emulators keep some of
+   those keys for themselves (MATE Terminal opens its own menu bar on F10;
+   many paste on Shift-Ins).
 
    Undo: the buffer logs every change itself (buf.he); the editor only marks
    where one undo step ends. Each command is one step, and so is a run of
@@ -66,7 +66,7 @@ var extern bmexe:*char;
 
 enum { CM_NONE, CM_OPEN, CM_SAVE, CM_SAVEAS, CM_EXIT, CM_CUT, CM_COPY,
   CM_PASTE, CM_CLEAR, CM_FIND, CM_AGAIN, CM_GOTO, CM_PREVERR, CM_NEXTERR,
-  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO };
+  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO, CM_REPLACE };
 
 /* the undo run an editing key belongs to (see edkindof) */
 enum { EK_NONE, EK_TYPE, EK_BS, EK_DEL };
@@ -87,6 +87,9 @@ var edsel,edsy,edsx:int;   /* a selection runs from its anchor to the cursor */
 var edy0,edx0,edy1,edx1:int; /* ... ordered by edselnorm */
 var edclip:*char;          /* the clipboard: text with newline bytes */
 var edfind:[ED_FIND]char;
+var edrepl:[ED_FIND]char;  /* Replace's new text */
+var edlastrep:int;         /* Search again repeats a Replace, not a Find */
+var edmbuf:[80]char;       /* a status message built at run time (edfmt) */
 var edpane,edptop:int;     /* message pane open, and its first shown row */
 var edkind:int;            /* the undo run the last key continued, or 0 */
 
@@ -444,6 +447,97 @@ func edsearch()
   return 0;
 }
 
+/* the status message pre, the decimal n, post -- built in edmbuf */
+func edfmt(pre:*char,n:int,post:*char):*char
+{
+  var [24]char:d;
+  var i,j:int;
+  j=0;
+  while(*pre&&(j<40))edmbuf[j++]=*pre++;
+  if(n<0)
+  {
+    edmbuf[j++]='-';
+    n=0-n;
+  }
+  i=0;
+  d[i++]='0'+n%10;
+  n=n/10;
+  while(n>0)
+  {
+    d[i++]='0'+n%10;
+    n=n/10;
+  }
+  while(i>0)
+  {
+    i--;
+    edmbuf[j++]=d[i];
+  }
+  while(*post&&(j<79))edmbuf[j++]=*post++;
+  edmbuf[j]=0;
+  return edmbuf;
+}
+
+/* Wait for one of keys (lower-case letters) or Esc, with the editor drawn
+   and edmsg asking the question on the status line, so whatever it is
+   about stays in view: the key, K_ESC, or -1 at end of input. */
+func edprompt(keys:*char)
+{
+  var k,i:int;
+  while(1)
+  {
+    edshow();
+    eddraw();
+    k=tuikey(0-1);
+    if(k==K_NONE)continue;
+    if(k==K_EOF)return 0-1;
+    if(k==K_RESIZE)
+    {
+      tuiresize();
+      continue;
+    }
+    if(k==K_ESC)return K_ESC;
+    if((k>='A')&&(k<='Z'))k=k+32;
+    for(i=0;keys[i];i++)
+    if(keys[i]==k)return k;
+  }
+}
+
+/* Replace edfind with edrepl from the cursor on. Each match is selected and
+   Y replaces it, N skips it, A replaces it and every later one without
+   asking, Esc stops; returns 1 if input ended (the editor exits). One undo
+   step takes back the whole command. */
+func edreploop()
+{
+  var k,all,cnt,found:int;
+  if(!edfind[0])return 0;
+  edlastrep=1;
+  b.mark(edcy,edcx);
+  all=0;
+  cnt=0;
+  found=0;
+  while(edsearch())
+  {
+    found=1;
+    if(!all)
+    {
+      edmsg="Replace this occurrence?  Y Yes  N No  A All  Esc Stop";
+      k=edprompt("yna");
+      if(k<0)return edeof();
+      if(k==K_ESC)break;
+      if(k=='n')continue;
+      if(k=='a')all=1;
+    }
+    eddelsel();
+    edinsert(edrepl);
+    cnt++;
+  }
+  edsel=0;
+  if(!found)return 0;            /* edsearch said it was not found */
+  if(cnt==1)edmsg="1 occurrence replaced";
+  else edmsg=edfmt("",cnt," occurrences replaced");
+  return 0;
+}
+
 func edeq(a:*char,c:*char)
 {
   while(*a&&(*a==*c))
@@ -644,8 +738,22 @@ func edcmd(c:int)
   {
     r=dlgline("Find","Text to find",edfind,ED_FIND);
     if(r<0)return edeof();
-    if(r)edsearch();
+    if(r)
+    {
+      edlastrep=0;
+      edsearch();
+    }
   }
+  else if(c==CM_REPLACE)
+  {
+    r=dlgline("Replace","Text to find",edfind,ED_FIND);
+    if(r<0)return edeof();
+    if(!r)return 0;
+    r=dlgline("Replace","New text",edrepl,ED_FIND);
+    if(r<0)return edeof();
+    if(r)return edreploop();
+  }
+  else if((c==CM_AGAIN)&&edlastrep)return edreploop();
   else if(c==CM_AGAIN)edsearch();
   else if(c==CM_GOTO)
   {
@@ -818,6 +926,7 @@ func edmenus()
   mnitem("C~l~ear","Ctrl-Del",CM_CLEAR);
   mnbegin("~S~earch");
   mnitem("~F~ind...","",CM_FIND);
+  mnitem("~R~eplace...","",CM_REPLACE);
   mnitem("~S~earch again","Ctrl-L",CM_AGAIN);
   mnitem("~G~o to line...","",CM_GOTO);
   mnitem(0,"",0);
@@ -856,6 +965,7 @@ func main(argc:int,argv:**char)
   }
   edcy=0;edcx=0;edtop=0;edleft=0;edmsg=0;edquit=0;edrc=0;
   edsel=0;edclip=0;edfind[0]=0;edpane=0;edptop=0;edkind=EK_NONE;
+  edrepl[0]=0;edlastrep=0;
   bmsel=0-1;
   edmenus();
   if(tuiinit())return 2;

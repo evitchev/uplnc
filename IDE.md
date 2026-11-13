@@ -246,8 +246,13 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      because no common terminal tells Turbo's Shift-Alt-Backspace apart.
      `buftest.e` proves undo and redo of every primitive, the cursors they
      report, and the saved-state bookkeeping on all five backends.
+     **Replace** (Search menu) asks for the text and its replacement, then
+     stops at each match with the question on the status line, so the
+     highlighted match stays in view: Y replaces, N skips, A replaces the
+     rest without asking, Esc stops. The whole command is one undo step, and
+     Ctrl-L repeats the last Find *or* Replace, as Turbo's Search again did.
    - **Not yet**: multi-unit programs (the build compiles the one open file;
-     Turbo's project files are the model), Run (Ctrl-F9), Replace, and
+     Turbo's project files are the model), Run (Ctrl-F9), and
      case-insensitive search.
 3. **Phase 2**: gdb/MI debugging — structured MI parser, dedicated inferior
    PTY and console pane, breakpoint margin, F7/F8, watch and call-stack
