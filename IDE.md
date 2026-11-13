@@ -251,9 +251,22 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      highlighted match stays in view: Y replaces, N skips, A replaces the
      rest without asking, Esc stops. The whole command is one undo step, and
      Ctrl-L repeats the last Find *or* Replace, as Turbo's Search again did.
-   - **Not yet**: multi-unit programs (the build compiles the one open file;
-     Turbo's project files are the model), Run (Ctrl-F9), and
-     case-insensitive search.
+     **Projects** follow Turbo C 2.0, whose .PRJ was a plain text file: one
+     unit per line (`.e` sources, and the `.c`/`.s`/`.o` files the driver
+     also takes), relative to the project file's own directory, with blank
+     and `#` lines skipped. F9 compiles every unit into the program named
+     after the project (`app.prj` builds `app`), re-reading the list at each
+     build, so a project is edited like any other file. `ed app.prj` opens
+     its first unit with the project set (a project file that does not
+     exist yet opens itself, to be filled in); Project/Open project sets one
+     from inside, its menu item showing the current project's name as Turbo
+     C's menus showed settings; Close project returns F9 to the open file.
+     An error in a unit that is not open opens that unit at the error.
+     `ide/ed.prj` is the IDE's own project, so the IDE rebuilds itself from
+     inside -- `[15]` does exactly that, from a copy of `ide/`. For such
+     steps `ptyrun.py` gained `u:TEXT`, a wait for text on the rendered
+     screen, instead of trusting a fixed delay to outlast a build.
+   - **Not yet**: Run (Ctrl-F9) and case-insensitive search.
 3. **Phase 2**: gdb/MI debugging — structured MI parser, dedicated inferior
    PTY and console pane, breakpoint margin, F7/F8, watch and call-stack
    windows.

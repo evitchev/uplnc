@@ -1022,8 +1022,12 @@ What turns a teaching compiler into something you'd build a project with:
       Alt-Backspace undoes, Redo is on the Edit menu; `buftest.e` proves both
       on all five backends. **Replace** stops at each match with a status-
       line question (Y / N / All / Esc), is one undo step as a whole, and is
-      what Ctrl-L repeats after it. Still to come: multi-unit projects, Run
-      (Ctrl-F9) (IDE.md §7).
+      what Ctrl-L repeats after it. **Projects** are Turbo C 2.0's text .PRJ:
+      one unit per line, relative to the project file, all built by F9 into
+      the program named after it; `ed app.prj` or Project/Open project sets
+      one, and an error in an unopened unit opens it. `ide/ed.prj` lets the
+      IDE rebuild itself, which `[15]` proves. Still to come: Run (Ctrl-F9)
+      (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array

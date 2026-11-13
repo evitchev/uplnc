@@ -7,7 +7,8 @@
    through the build's errors, Ctrl-L repeats the last Find or Replace,
    Shift-Del / Ctrl-Ins / Shift-Ins / Ctrl-Del cut, copy, paste and clear,
    Alt-Backspace undoes, Esc closes the message pane, F10 or Alt+a menu
-   letter opens the menus (Alt-F, Alt-E, Alt-S, Alt-C), and Alt-X quits.
+   letter opens the menus (Alt-F, Alt-E, Alt-S, Alt-C, Alt-P), and Alt-X
+   quits.
    Every command is also on a menu, because terminal emulators keep some of
    those keys for themselves (MATE Terminal opens its own menu bar on F10;
    many paste on Shift-Ins).
@@ -17,6 +18,10 @@
    keys of one kind -- typing (up to and including an Enter), Backspaces, or
    Dels -- so Undo takes back one typed line, or one run of deletions.
 
+   Projects: with one set -- by "ed app.prj", which also opens its first
+   unit, or by Project/Open project -- F9 builds every unit app.prj lists
+   into the program app (build.e has the format).
+
    Layout: row 0 is the menu bar, row h-1 the status bar, the message pane
    (when open) sits just above the status bar, and the rows between are the
    text viewport. The viewport origin (edtop, edleft) follows the cursor:
@@ -24,7 +29,8 @@
    handler only has to move the cursor.
 
    Build: perl src/langdrv.pl -o ed ide/ed.e ide/menu.e ide/build.e ide/buf.e
-          ide/tui.e ide/tshim.c */
+          ide/tui.e ide/tshim.c
+   or, once built, open ide/ed.prj in it and press F9. */
 
 #include "tui.he"
 #include "buf.he"
@@ -43,12 +49,16 @@ func tuikey(ms:int);
 func mninit();
 func mnbegin(t:*char);
 func mnitem(label:*char,key:*char,cmd:int);
+func mnsetkey(cmd:int,key:*char);
 func mnbar(open:int);
 func mnfind(c:int);
 func mnrun(m:int);
 func dlgline(t:*char,prompt:*char,buf:*char,cap:int);
 func dlgask(t:*char,text:*char,hint:*char,keys:*char);
 func bdrun(file:*char);
+func bdunits(prj:*char);
+func bdext(s:*char,ext:*char);
+func bdprjname():*char;
 func bmcount();
 func bmnext(d:int);
 func bmshow(i:int):*char;
@@ -63,10 +73,12 @@ var extern bmline:*int;
 var extern bmcol:*int;
 var extern bmsel:int;
 var extern bmexe:*char;
+var extern bdprj:*char;
+var extern bdunit:**char;
 
 enum { CM_NONE, CM_OPEN, CM_SAVE, CM_SAVEAS, CM_EXIT, CM_CUT, CM_COPY,
   CM_PASTE, CM_CLEAR, CM_FIND, CM_AGAIN, CM_GOTO, CM_PREVERR, CM_NEXTERR,
-  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO, CM_REPLACE };
+  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO, CM_REPLACE, CM_PRJOPEN, CM_PRJCLOSE };
 
 /* the undo run an editing key belongs to (see edkindof) */
 enum { EK_NONE, EK_TYPE, EK_BS, EK_DEL };
@@ -237,11 +249,11 @@ func edpaint()
   w=tuicols();
   h=tuirows();
   rows=edrows();
-  mnbar(0-1);
+  x=mnbar(0-1);
   /* the file name at the right of the menu bar, if it fits */
   nl=strlen2(edname)+2;
   if(b.dirty)nl=nl+2;
-  if(nl+34<w)
+  if(x+4+nl<w)
   {
     tuitext(w-nl,0,edname,edtitle);
     if(b.dirty)tuitext(w-4,0," *",edtitle);
@@ -607,6 +619,16 @@ func edload(nm:*char)
   return 1;
 }
 
+/* make p the project (0 for none); Project/Open project shows its name */
+func edproject(p:*char)
+{
+  if(bdprj)free(bdprj);
+  bdprj=0;
+  if(p)bdprj=eddup(p);
+  mnsetkey(CM_PRJOPEN,bdprjname());
+  return 0;
+}
+
 /* go to message i's location, opening its file when it is another one */
 func edjump(i:int)
 {
@@ -769,6 +791,33 @@ func edcmd(c:int)
       edcy=n-1;
       edcx=0;
     }
+  }
+  else if(c==CM_PRJOPEN)
+  {
+    /* offer the project file being edited, else the current project */
+    path[0]=0;
+    if(bdext(edname,".prj"))edcopy(path,edname,ED_PATH);
+    else if(bdprj)edcopy(path,bdprj,ED_PATH);
+    r=dlgline("Open Project","Project file",path,ED_PATH);
+    if(r<0)return edeof();
+    if(r&&path[0])
+    {
+      if(bdunits(path)>=0)
+      {
+        edproject(path);
+        edmsg="Project opened: F9 builds it";
+      }
+      else
+      {
+        r=dlgask("Error","Cannot read that project file.","Press any key","");
+        if(r<0)return edeof();
+      }
+    }
+  }
+  else if(c==CM_PRJCLOSE)
+  {
+    edproject(0);
+    edmsg="Project closed";
   }
   else if(c==CM_BUILD)return edbuild();
   else if(c==CM_NEXTERR)return edjump(bmnext(1));
@@ -935,6 +984,9 @@ func edmenus()
   mnbegin("~C~ompile");
   mnitem("~B~uild","F9",CM_BUILD);
   mnitem("~M~essages","",CM_MSGS);
+  mnbegin("~P~roject");
+  mnitem("~O~pen project...","",CM_PRJOPEN);
+  mnitem("~C~lose project","",CM_PRJCLOSE);
   return 0;
 }
 
@@ -943,11 +995,23 @@ func main(argc:int,argv:**char)
   var k:int;
   if(argc<2)
   {
-    fprintf(stderr,"usage: ed <file>\n");
+    fprintf(stderr,"usage: ed <file>\n       ed <project>.prj\n");
     return 2;
   }
   edname=argv[1];
   edowned=0;
+  edmenus();
+  /* a project file opens its first unit with the project set; one that
+     names no units yet opens itself, to be filled in */
+  if(bdext(edname,".prj"))
+  {
+    edproject(edname);
+    if(bdunits(edname)>0)
+    {
+      edname=eddup(bdunit[0]);
+      edowned=1;
+    }
+  }
   edtitle=C_BLACK+C_WHITE*16;
   edtext=C_BWHITE+C_BLUE*16;
   edstat=C_BLACK+C_WHITE*16;
@@ -967,7 +1031,6 @@ func main(argc:int,argv:**char)
   edsel=0;edclip=0;edfind[0]=0;edpane=0;edptop=0;edkind=EK_NONE;
   edrepl[0]=0;edlastrep=0;
   bmsel=0-1;
-  edmenus();
   if(tuiinit())return 2;
   edshow();
   eddraw();
@@ -984,5 +1047,6 @@ func main(argc:int,argv:**char)
   b.done();
   if(edclip)free(edclip);
   if(edowned)free(edname);
+  edproject(0);
   return edrc;
 }

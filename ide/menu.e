@@ -79,6 +79,16 @@ func mnitem(label:*char,key:*char,cmd:int)
   return 0;
 }
 
+/* show key at the right of command cmd's item instead of its shortcut: a
+   setting's current value, as Turbo C's menus showed the project name */
+func mnsetkey(cmd:int,key:*char)
+{
+  var i:int;
+  for(i=0;i<mitems;i++)
+  if(milabel[i]&&(micmd[i]==cmd))mikey[i]=key;
+  return 0;
+}
+
 func mnstrlen(s:*char)
 {
   var n:int;
@@ -139,7 +149,8 @@ func mnfind(c:int)
   return 0-1;
 }
 
-/* the menu bar on row 0, menu `open` highlighted (-1 for none) */
+/* the menu bar on row 0, menu `open` highlighted (-1 for none); returns
+   the column just after the last title */
 func mnbar(open:int)
 {
   var i,x:int;
@@ -156,7 +167,7 @@ func mnbar(open:int)
     else mnlabel(x+1,0,mntitle[i],mnbarc,mnhotc);
     x=x+mnlen(mntitle[i])+2;
   }
-  return 0;
+  return x;
 }
 
 /* the inner width of menu m: a space, the widest label, three spaces and
