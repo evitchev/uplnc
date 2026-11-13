@@ -418,6 +418,8 @@ func tuikey(ms:int)
     if(c=='F')return K_END;
     return K_NONE;
   }
+  /* Alt-Backspace: ESC DEL, or ESC BS where Backspace sends ^H */
+  if((c==127)||(c==K_BS))return K_ALT+K_BS;
   /* ESC followed by a printable byte is Alt+that key; a lone ESC timed out
      above. Upper and lower case fold together, so Alt-X and Alt-x are one. */
   if((c>=32)&&(c<127))

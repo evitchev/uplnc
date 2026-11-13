@@ -5,11 +5,17 @@
    keys and Enter/Backspace/Del edit (Tab enters two spaces; typing over a
    selection replaces it), F2 saves, F3 opens, F9 builds, Alt-F7/Alt-F8 step
    through the build's errors, Ctrl-L repeats the last search, Shift-Del /
-   Ctrl-Ins / Shift-Ins / Ctrl-Del cut, copy, paste and clear, Esc closes
-   the message pane, F10 or Alt+a menu letter opens the menus (Alt-F, Alt-E,
-   Alt-S, Alt-C), and Alt-X quits. Every command is also on a menu, because
-   terminal emulators keep some of those keys for themselves (MATE Terminal
-   opens its own menu bar on F10; many paste on Shift-Ins).
+   Ctrl-Ins / Shift-Ins / Ctrl-Del cut, copy, paste and clear, Alt-Backspace
+   undoes, Esc closes the message pane, F10 or Alt+a menu letter opens the
+   menus (Alt-F, Alt-E, Alt-S, Alt-C), and Alt-X quits. Every command is also
+   on a menu, because terminal emulators keep some of those keys for
+   themselves (MATE Terminal opens its own menu bar on F10; many paste on
+   Shift-Ins).
+
+   Undo: the buffer logs every change itself (buf.he); the editor only marks
+   where one undo step ends. Each command is one step, and so is a run of
+   keys of one kind -- typing (up to and including an Enter), Backspaces, or
+   Dels -- so Undo takes back one typed line, or one run of deletions.
 
    Layout: row 0 is the menu bar, row h-1 the status bar, the message pane
    (when open) sits just above the status bar, and the rows between are the
@@ -60,7 +66,10 @@ var extern bmexe:*char;
 
 enum { CM_NONE, CM_OPEN, CM_SAVE, CM_SAVEAS, CM_EXIT, CM_CUT, CM_COPY,
   CM_PASTE, CM_CLEAR, CM_FIND, CM_AGAIN, CM_GOTO, CM_PREVERR, CM_NEXTERR,
-  CM_BUILD, CM_MSGS };
+  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO };
+
+/* the undo run an editing key belongs to (see edkindof) */
+enum { EK_NONE, EK_TYPE, EK_BS, EK_DEL };
 
 #define ED_PATH 256        /* a path typed into a dialog, with its NUL */
 #define ED_FIND 128        /* the search text, with its NUL */
@@ -79,6 +88,7 @@ var edy0,edx0,edy1,edx1:int; /* ... ordered by edselnorm */
 var edclip:*char;          /* the clipboard: text with newline bytes */
 var edfind:[ED_FIND]char;
 var edpane,edptop:int;     /* message pane open, and its first shown row */
+var edkind:int;            /* the undo run the last key continued, or 0 */
 
 /* the message pane's height, 0 when it is closed or the screen too short */
 func edpaneh()
@@ -303,6 +313,16 @@ func edmove(k:int)
   if(edcy>=b.n)edcy=b.n-1;
   if(edcx>edlen())edcx=edlen();
   return 1;
+}
+
+/* the undo run a key belongs to: typing (Enter and Tab included),
+   Backspace, Del, or EK_NONE for a key that does not edit */
+func edkindof(k:int)
+{
+  if((k==K_ENTER)||(k==K_TAB)||((k>=32)&&(k<127)))return EK_TYPE;
+  if(k==K_BS)return EK_BS;
+  if(k==K_DEL)return EK_DEL;
+  return EK_NONE;
 }
 
 /* delete the selected text, leaving the cursor where it started */
@@ -549,6 +569,7 @@ func edcmd(c:int)
 {
   var [ED_PATH]char:path;
   var r,n,i:int;
+  edkind=EK_NONE;           /* a command is an undo step of its own */
   if(c<0)return edeof();
   if(c==CM_EXIT)return edquitreq();
   if(c==CM_SAVE)
@@ -585,18 +606,40 @@ func edcmd(c:int)
   }
   else if(c==CM_CUT)
   {
-    if(edcopysel())eddelsel();
+    if(edcopysel())
+    {
+      b.mark(edcy,edcx);
+      eddelsel();
+    }
   }
   else if(c==CM_COPY)edcopysel();
   else if(c==CM_PASTE)
   {
     if(edclip)
     {
+      b.mark(edcy,edcx);
       eddelsel();
       edinsert(edclip);
     }
   }
-  else if(c==CM_CLEAR)eddelsel();
+  else if(c==CM_CLEAR)
+  {
+    b.mark(edcy,edcx);
+    eddelsel();
+  }
+  else if((c==CM_UNDO)||(c==CM_REDO))
+  {
+    if(c==CM_UNDO)r=b.undo();
+    else r=b.redo();
+    if(r)
+    {
+      edsel=0;
+      edcy=b.uy;
+      edcx=b.ux;
+    }
+    else if(c==CM_UNDO)edmsg="Nothing to undo";
+    else edmsg="Nothing to redo";
+  }
   else if((c==CM_FIND)||((c==CM_AGAIN)&&!edfind[0]))
   {
     r=dlgline("Find","Text to find",edfind,ED_FIND);
@@ -639,7 +682,7 @@ func edquitreq()
 /* one key; returns 1 when the editor should exit */
 func edkey(k:int)
 {
-  var m,base:int;
+  var m,base,kind:int;
   if(k==K_RESIZE){tuiresize();return 0;}
   if(k==K_EOF)return edeof();
   if(edquit)
@@ -654,8 +697,11 @@ func edkey(k:int)
     return 0;
   }
   edmsg=0;
+  kind=edkindof(k);
+  if(!kind)edkind=EK_NONE;  /* any other key ends a run of typing */
   if(edisquit(k))return edquitreq();
   if(k==K_F10)return edcmd(mnrun(0));
+  if(k==K_ALT+K_BS)return edcmd(CM_UNDO);
   if((k>K_ALT)&&(k<K_ALT+256))
   {
     m=mnfind(k-K_ALT);
@@ -696,6 +742,12 @@ func edkey(k:int)
     edsel=0;
     return 0;
   }
+  if(!kind)return 0;
+  /* an editing key starts a new undo step unless it continues a run of its
+     own kind; replacing a selection always starts one */
+  if((kind!=edkind)||edselnorm())b.mark(edcy,edcx);
+  edkind=kind;
+  if(k==K_ENTER)edkind=EK_NONE;   /* each typed line undoes on its own */
   if((k==K_BS)||(k==K_DEL))
   {
     if(edsel&&eddelsel())return 0;
@@ -757,6 +809,9 @@ func edmenus()
   mnitem(0,"",0);
   mnitem("E~x~it","Alt-X",CM_EXIT);
   mnbegin("~E~dit");
+  mnitem("~U~ndo","Alt-BkSp",CM_UNDO);
+  mnitem("~R~edo","",CM_REDO);
+  mnitem(0,"",0);
   mnitem("Cu~t~","Shift-Del",CM_CUT);
   mnitem("~C~opy","Ctrl-Ins",CM_COPY);
   mnitem("~P~aste","Shift-Ins",CM_PASTE);
@@ -800,7 +855,7 @@ func main(argc:int,argv:**char)
     return 2;
   }
   edcy=0;edcx=0;edtop=0;edleft=0;edmsg=0;edquit=0;edrc=0;
-  edsel=0;edclip=0;edfind[0]=0;edpane=0;edptop=0;
+  edsel=0;edclip=0;edfind[0]=0;edpane=0;edptop=0;edkind=EK_NONE;
   bmsel=0-1;
   edmenus();
   if(tuiinit())return 2;

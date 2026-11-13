@@ -1013,8 +1013,15 @@ What turns a teaching compiler into something you'd build a project with:
       truncation) and `tsh_machine` on every backend with a toolchain;
       `[15]` drives menus, dialogs, selection, search, Open/Save as, and
       real builds on a pseudo-terminal, asserting on open menus and dialogs
-      through a new snapshot mark in `ptyrun.py`/`screen.py`. Not yet:
-      multi-unit projects, Run (Ctrl-F9), undo, Replace (IDE.md §7).
+      through a new snapshot mark in `ptyrun.py`/`screen.py`.
+    - 🟡 **Phase 1 slice 1c: undo, Replace, projects, Run** (2026-11).
+      **Undo/redo** is in the buffer: each text-changing primitive logs
+      itself before acting, so no command can bypass it; the editor marks
+      where a step ends (one command, or a run of typing, Backspaces, or
+      Dels), and undoing back to the saved text leaves the buffer clean.
+      Alt-Backspace undoes, Redo is on the Edit menu; `buftest.e` proves both
+      on all five backends. Still to come: Replace, multi-unit projects, Run
+      (Ctrl-F9) (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array

@@ -234,9 +234,21 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      tool, a snapshot mark (`ptyrun.py`'s `s`, `screen.py --snap N`), to
      assert on a menu or dialog while it is open; build results are read
      from the final screen instead, so a slow build cannot race them.
+   - **Slice 1c: undo, Replace, projects, Run** (2026-11, in progress).
+     **Undo/redo** lives in the buffer, not the editor: every primitive that
+     changes text logs itself (`ulog`) before acting, so no editing command
+     can bypass undo, and the editor only marks where one undo step ends
+     (`mark`, with the cursor to put back). A step is one command, or one
+     run of keys of a kind -- typing up to and including an Enter,
+     Backspaces, Dels -- and undoing back to the saved text makes the
+     buffer clean again, so Alt-X no longer asks. Alt-Backspace undoes (ESC
+     DEL, or ESC BS where Backspace sends ^H); Redo is on the Edit menu,
+     because no common terminal tells Turbo's Shift-Alt-Backspace apart.
+     `buftest.e` proves undo and redo of every primitive, the cursors they
+     report, and the saved-state bookkeeping on all five backends.
    - **Not yet**: multi-unit programs (the build compiles the one open file;
-     Turbo's project files are the model), Run (Ctrl-F9), undo, Replace,
-     and case-insensitive search.
+     Turbo's project files are the model), Run (Ctrl-F9), Replace, and
+     case-insensitive search.
 3. **Phase 2**: gdb/MI debugging — structured MI parser, dedicated inferior
    PTY and console pane, breakpoint margin, F7/F8, watch and call-stack
    windows.

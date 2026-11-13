@@ -7,7 +7,12 @@
    File model: load splits on newline, and a final newline does not create an
    extra empty line; save writes every line followed by a newline. A file that
    did not end with a newline therefore gains one, which is the usual editor
-   behaviour and keeps the round trip exact for source files. */
+   behaviour and keeps the round trip exact for source files.
+
+   Undo: each primitive that changes text logs the change (ulog) before
+   making it, unless uoff is set -- as it is while undo and redo replay the
+   log, while load builds a new text, and while split and join use insline
+   and delline internally, so one Enter is one record, not two. */
 
 #include "buf.he"
 
@@ -43,6 +48,18 @@ func bfoom()
   return 0;
 }
 
+/* a heap copy of the first len bytes of s */
+func bfdup(s:*char,len:int):*char
+{
+  var p:*char;
+  var i:int;
+  p=malloc(len+1);
+  if(!p)bfoom();
+  for(i=0;i<len;i++)p[i]=s[i];
+  p[len]=0;
+  return p;
+}
+
 method sbuf.init()
 {
   a=BF_ROWS0;
@@ -55,6 +72,7 @@ method sbuf.init()
   l[0].s[0]=0;
   l[0].len=0;
   dirty=0;
+  u=0;un=0;utop=0;ua=0;usave=0;uoff=0;uopen=0;uhave=0;uy=0;ux=0;
   return 0;
 }
 
@@ -67,6 +85,9 @@ method sbuf.done()
   l=0;
   n=0;
   a=0;
+  this->utrim(0);
+  if(u)free(u);
+  u=0;ua=0;usave=0;uopen=0;uhave=0;
   return 0;
 }
 
@@ -96,6 +117,7 @@ method sbuf.insline(i:int)
 {
   var j:int;
   if((i<0)||(i>n))return 0;
+  if(!uoff)this->ulog(BU_INSLINE,i,0,0,0);
   this->grow(n+1);
   for(j=n;j>i;j--)
   {
@@ -117,6 +139,7 @@ method sbuf.delline(i:int)
 {
   var j:int;
   if((i<0)||(i>=n))return 0;
+  if(!uoff)this->ulog(BU_DELLINE,i,l[i].len,n==1,bfdup(l[i].s,l[i].len));
   if(n==1)                 /* the last line is emptied, never removed */
   {
     l[0].s[0]=0;
@@ -153,6 +176,7 @@ method sbuf.insch(i:int,col:int,c:int)
   var j:int;
   if((i<0)||(i>=n))return 0;
   if((col<0)||(col>l[i].len))return 0;
+  if(!uoff)this->ulog(BU_INSCH,i,col,c,0);
   this->setcap(i,l[i].len+1);
   for(j=l[i].len;j>col;j--)l[i].s[j]=l[i].s[j-1];
   l[i].s[col]=c;
@@ -167,6 +191,7 @@ method sbuf.delch(i:int,col:int)
   var j:int;
   if((i<0)||(i>=n))return 0;
   if((col<0)||(col>=l[i].len))return 0;
+  if(!uoff)this->ulog(BU_DELCH,i,col,l[i].s[col],0);
   for(j=col;j<l[i].len-1;j++)l[i].s[j]=l[i].s[j+1];
   l[i].len=l[i].len-1;
   l[i].s[l[i].len]=0;
@@ -179,8 +204,11 @@ method sbuf.split(i:int,col:int)
   var j,tail:int;
   if((i<0)||(i>=n))return 0;
   if((col<0)||(col>l[i].len))return 0;
+  if(!uoff)this->ulog(BU_SPLIT,i,col,0,0);
   tail=l[i].len-col;
+  uoff++;
   this->insline(i+1);
+  uoff--;
   this->setcap(i+1,tail);
   for(j=0;j<tail;j++)l[i+1].s[j]=l[i].s[col+j];
   l[i+1].s[tail]=0;
@@ -195,12 +223,15 @@ method sbuf.join(i:int)
 {
   var j,at:int;
   if((i<0)||(i+1>=n))return 0;
+  if(!uoff)this->ulog(BU_JOIN,i,l[i].len,0,0);
   at=l[i].len;
   this->setcap(i,at+l[i+1].len);
   for(j=0;j<l[i+1].len;j++)l[i].s[at+j]=l[i+1].s[j];
   l[i].len=at+l[i+1].len;
   l[i].s[l[i].len]=0;
+  uoff++;
   this->delline(i+1);
+  uoff--;
   dirty=1;
   return 0;
 }
@@ -268,6 +299,7 @@ method sbuf.load(nm:*char)
   fp=fopen(nm,"r");
   if(!fp)return 0;
   t.init();
+  t.uoff=1;                      /* a loaded text starts with no history */
   while((c=fgetc(fp))>=0)
   {
     if(c==10)
@@ -284,7 +316,8 @@ method sbuf.load(nm:*char)
      but never below the one line the buffer always keeps */
   if((t.n>1)&&(t.l[t.n-1].len==0))t.delline(t.n-1);
   /* The complete replacement is now known-good. Steal its allocations only
-     now, so every fopen/fgetc/fclose failure leaves this buffer untouched. */
+     now, so every fopen/fgetc/fclose failure leaves this buffer untouched.
+     done() also drops this buffer's undo log, which described the old text. */
   this->done();
   l=t.l;n=t.n;a=t.a;
   dirty=0;
@@ -349,5 +382,151 @@ method sbuf.save(nm:*char)
   }
   free(tmp);if(real)free(real);
   dirty=0;
+  usave=un;
+  return 1;
+}
+
+/* End the current undo group: the next change starts a new one, which undo
+   reverts as a whole, putting the cursor back at y,x. The editor marks with
+   the cursor as it was before the command that is about to edit. */
+method sbuf.mark(y:int,x:int)
+{
+  uopen=0;
+  uhave=1;
+  umy=y;
+  umx=x;
+  return 0;
+}
+
+/* drop the records from index i on */
+method sbuf.utrim(i:int)
+{
+  var j:int;
+  for(j=i;j<utop;j++)if(u[j].text)free(u[j].text);
+  utop=i;
+  if(un>utop)un=utop;
+  return 0;
+}
+
+/* append one record and put it in effect */
+method sbuf.upush(op:int,y:int,x:int,ch:int,text:*char)
+{
+  if(utop>=ua)
+  {
+    if(ua<64)ua=64;
+    else ua=ua*2;
+    u=realloc(u,ua*sizeof(sbundo));
+    if(!u)bfoom();
+  }
+  u[utop].op=op;
+  u[utop].y=y;
+  u[utop].x=x;
+  u[utop].ch=ch;
+  u[utop].text=text;
+  utop++;
+  un=utop;
+  return 0;
+}
+
+/* Log a change that is about to be made. Whatever could have been redone is
+   dropped first -- and with it the saved state, if that lay there -- and a
+   group mark goes in first unless the newest group is still open. A group
+   nobody marked records the change's own position as its cursor. */
+method sbuf.ulog(op:int,y:int,x:int,ch:int,text:*char)
+{
+  this->utrim(un);
+  if(usave>un)usave=0-1;
+  if(!uopen)
+  {
+    if(uhave)this->upush(BU_MARK,umy,umx,0,0);
+    else this->upush(BU_MARK,y,x,0,0);
+    uopen=1;
+    uhave=0;
+  }
+  this->upush(op,y,x,ch,text);
+  return 0;
+}
+
+/* Revert the newest group, its last change first. 1 with the cursor its
+   mark recorded in uy,ux, or 0 when there is nothing to undo. The buffer is
+   clean again exactly when this returns it to the last saved state. */
+method sbuf.undo()
+{
+  var op,y,x,j:int;
+  var t:*char;
+  if(un<=0)return 0;
+  uoff++;
+  while(un>0)
+  {
+    un--;
+    op=u[un].op;
+    y=u[un].y;
+    x=u[un].x;
+    uy=y;
+    ux=x;
+    if(op==BU_MARK)break;
+    if(op==BU_INSCH)this->delch(y,x);
+    else if(op==BU_DELCH)this->insch(y,x,u[un].ch);
+    else if(op==BU_SPLIT)this->join(y);
+    else if(op==BU_JOIN)this->split(y,x);
+    else if(op==BU_INSLINE)this->delline(y);
+    else if(op==BU_DELLINE)
+    {
+      if(!u[un].ch)this->insline(y);
+      t=u[un].text;
+      for(j=0;j<x;j++)this->insch(y,j,t[j]);
+    }
+  }
+  uoff--;
+  uopen=0;
+  uhave=0;
+  dirty=(un!=usave);
+  return 1;
+}
+
+/* Reapply the group undo reverted last, in its original order. 1 with the
+   cursor just after its last change in uy,ux, or 0 when there is nothing to
+   redo. A new change discards whatever could still have been redone. */
+method sbuf.redo()
+{
+  var op,y,x:int;
+  if(un>=utop)return 0;
+  uoff++;
+  uy=u[un].y;                    /* the group's mark */
+  ux=u[un].x;
+  un++;
+  while(un<utop)
+  {
+    op=u[un].op;
+    if(op==BU_MARK)break;
+    y=u[un].y;
+    x=u[un].x;
+    if(op==BU_INSCH)
+    {
+      this->insch(y,x,u[un].ch);
+      x++;
+    }
+    else if(op==BU_DELCH)this->delch(y,x);
+    else if(op==BU_SPLIT)
+    {
+      this->split(y,x);
+      y++;
+      x=0;
+    }
+    else if(op==BU_JOIN)this->join(y);
+    else if(op==BU_INSLINE)this->insline(y);
+    else if(op==BU_DELLINE)
+    {
+      this->delline(y);
+      x=0;
+    }
+    uy=y;
+    ux=x;
+    un++;
+  }
+  uoff--;
+  uopen=0;
+  uhave=0;
+  dirty=(un!=usave);
   return 1;
 }

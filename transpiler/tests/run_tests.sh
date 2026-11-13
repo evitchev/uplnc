@@ -2789,6 +2789,7 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
             && grep -q '^ *File  Edit  Search  Compile' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Open\.\.\. *F3 x' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Exit *Alt-X x' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q 'x Undo *Alt-BkSp x' "$TMPD/uplnc_ed_menu2.screen" \
             && grep -q 'x Copy *Ctrl-Ins x' "$TMPD/uplnc_ed_menu2.screen" \
             && ! grep -q 'Open\.\.\.' "$TMPD/uplnc_ed_menu2.screen"; then
         ok "editor menus: Alt-F and F10 open them, Right moves along the bar"
@@ -2913,6 +2914,45 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
         ok "editor F9 builds a clean program that runs"
     else
         bad "editor clean build"
+    fi
+    # Undo (Alt-Backspace = ESC DEL) takes back a run of typing at a time:
+    # "cd" first, then "ab" with the Enter that ended it, each time putting
+    # the cursor back where the run began; Edit/Redo replays "ab" and Enter.
+    printf 'one\n' > "$TMPD/uplnc_ed_undo.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_undo.txt" \
+        w:6162 w:0d w:6364 w:1b7f w:1b7f s w:1b65 w:72 s w:1b4f51 p w:1b78 \
+        > "$TMPD/uplnc_ed_undo.bin" 2> "$TMPD/uplnc_ed_undo.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_undo.bin" \
+        > "$TMPD/uplnc_ed_undo1.screen"
+    python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_undo.bin" \
+        > "$TMPD/uplnc_ed_undo2.screen"
+    printf 'ab\none\n' > "$TMPD/uplnc_ed_undo.want"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_undo.err" \
+            && [ "$(sed -n 2,3p "$TMPD/uplnc_ed_undo1.screen")" = one ] \
+            && grep -q '^ L1 C1 ' "$TMPD/uplnc_ed_undo1.screen" \
+            && [ "$(sed -n 2,3p "$TMPD/uplnc_ed_undo2.screen")" = "$(printf 'ab\none')" ] \
+            && grep -q '^ L2 C1 ' "$TMPD/uplnc_ed_undo2.screen" \
+            && cmp -s "$TMPD/uplnc_ed_undo.txt" "$TMPD/uplnc_ed_undo.want"; then
+        ok "editor undoes a run of typing at a time; Edit/Redo replays it"
+    else
+        bad "editor undo/redo"
+    fi
+    # With nothing to undo it says so. Typing over a selection is one step,
+    # and undoing back to the loaded text leaves the buffer clean: Alt-X
+    # then quits at once, and the file is never written. (The second undo
+    # is ESC BS: Alt-Backspace where Backspace sends ^H.)
+    printf 'alpha\n' > "$TMPD/uplnc_ed_undo2.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_undo2.txt" \
+        w:1b7f s w:1b5b313b3246 w:5a w:1b08 w:1b78 \
+        > "$TMPD/uplnc_ed_undo2.bin" 2> "$TMPD/uplnc_ed_undo2.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_undo2.bin" \
+        > "$TMPD/uplnc_ed_undo3.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_undo2.err" \
+            && grep -q 'Nothing to undo' "$TMPD/uplnc_ed_undo3.screen" \
+            && [ "$(cat "$TMPD/uplnc_ed_undo2.txt")" = alpha ]; then
+        ok "editor undo back to the loaded text leaves the buffer clean"
+    else
+        bad "editor undo to a clean buffer"
     fi
 else
     echo "  skip - editor tests need python3 and a native build"
