@@ -1,17 +1,17 @@
 /* ed.e: the IDE's editor (IDE.md phase 1) -- a Turbo-style menu bar, one
-   editor window, a message pane, and F9 build with error jump.
+   editor window, a message pane, F9 build with error jump, and Run.
 
    Keys: arrows/Home/End/PgUp/PgDn move (with Shift they select), printable
    keys and Enter/Backspace/Del edit (Tab enters two spaces; typing over a
-   selection replaces it), F2 saves, F3 opens, F9 builds, Alt-F7/Alt-F8 step
+   selection replaces it), F2 saves, F3 opens, F9 builds, Ctrl-F9 builds and
+   runs, Alt-F5 shows the screen the program wrote, Alt-F7/Alt-F8 step
    through the build's errors, Ctrl-L repeats the last Find or Replace,
    Shift-Del / Ctrl-Ins / Shift-Ins / Ctrl-Del cut, copy, paste and clear,
    Alt-Backspace undoes, Esc closes the message pane, F10 or Alt+a menu
-   letter opens the menus (Alt-F, Alt-E, Alt-S, Alt-C, Alt-P), and Alt-X
-   quits.
-   Every command is also on a menu, because terminal emulators keep some of
-   those keys for themselves (MATE Terminal opens its own menu bar on F10;
-   many paste on Shift-Ins).
+   letter opens the menus (Alt-F, Alt-E, Alt-S, Alt-R, Alt-C, Alt-P), and
+   Alt-X quits. Every command is also on a menu, because terminal emulators
+   keep some of those keys for themselves (MATE Terminal opens its own menu
+   bar on F10; many paste on Shift-Ins).
 
    Undo: the buffer logs every change itself (buf.he); the editor only marks
    where one undo step ends. Each command is one step, and so is a run of
@@ -21,6 +21,10 @@
    Projects: with one set -- by "ed app.prj", which also opens its first
    unit, or by Project/Open project -- F9 builds every unit app.prj lists
    into the program app (build.e has the format).
+
+   Run: the program gets the terminal itself and writes to the shell's
+   screen -- the user screen, as Turbo's was DOS's -- and the IDE takes the
+   terminal back when it ends, reporting how it ended on the status line.
 
    Layout: row 0 is the menu bar, row h-1 the status bar, the message pane
    (when open) sits just above the status bar, and the rows between are the
@@ -37,6 +41,7 @@
 
 func tuiinit();
 func tuidone();
+func tuiuser();
 func tuiresize();
 func tuirows();
 func tuicols();
@@ -56,6 +61,7 @@ func mnrun(m:int);
 func dlgline(t:*char,prompt:*char,buf:*char,cap:int);
 func dlgask(t:*char,text:*char,hint:*char,keys:*char);
 func bdrun(file:*char);
+func bdspawn(args:*char);
 func bdunits(prj:*char);
 func bdext(s:*char,ext:*char);
 func bdprjname():*char;
@@ -78,13 +84,15 @@ var extern bdunit:**char;
 
 enum { CM_NONE, CM_OPEN, CM_SAVE, CM_SAVEAS, CM_EXIT, CM_CUT, CM_COPY,
   CM_PASTE, CM_CLEAR, CM_FIND, CM_AGAIN, CM_GOTO, CM_PREVERR, CM_NEXTERR,
-  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO, CM_REPLACE, CM_PRJOPEN, CM_PRJCLOSE };
+  CM_BUILD, CM_MSGS, CM_UNDO, CM_REDO, CM_REPLACE, CM_PRJOPEN, CM_PRJCLOSE,
+  CM_RUN, CM_USER, CM_ARGS };
 
 /* the undo run an editing key belongs to (see edkindof) */
 enum { EK_NONE, EK_TYPE, EK_BS, EK_DEL };
 
 #define ED_PATH 256        /* a path typed into a dialog, with its NUL */
 #define ED_FIND 128        /* the search text, with its NUL */
+#define ED_ARGS 256        /* Run's program arguments, with their NUL */
 #define ED_PANE 8          /* message pane height, its title row included */
 
 var b:sbuf;
@@ -102,6 +110,7 @@ var edfind:[ED_FIND]char;
 var edrepl:[ED_FIND]char;  /* Replace's new text */
 var edlastrep:int;         /* Search again repeats a Replace, not a Find */
 var edmbuf:[80]char;       /* a status message built at run time (edfmt) */
+var edargs:[ED_ARGS]char;  /* the arguments Run passes the program */
 var edpane,edptop:int;     /* message pane open, and its first shown row */
 var edkind:int;            /* the undo run the last key continued, or 0 */
 
@@ -285,7 +294,8 @@ func edpaint()
   tuitext(x,h-1," C",edstat);
   ednum(x+2,h-1,edcx+1,edstat);
   if(edmsg)tuitext(14,h-1,edmsg,edstat);
-  else tuitext(14,h-1,"F2 Save  F3 Open  F9 Build  F10 Menu  Alt-X Quit",edstat);
+  else tuitext(14,h-1,
+  "F2 Save  F3 Open  F9 Build  Ctrl-F9 Run  F10 Menu  Alt-X Quit",edstat);
   return 0;
 }
 
@@ -655,8 +665,23 @@ func edjump(i:int)
   return 0;
 }
 
-/* F9: save, build, and land on the first error */
-func edbuild()
+/* Run the program the last build made: the terminal goes to it, comes
+   back when it ends, and the status line says how it ended. */
+func edrun()
+{
+  var st:int;
+  tuidone();
+  st=bdspawn(edargs);
+  tuiinit();
+  if(st<0)edmsg="Cannot start the program";
+  else if(st>=256)edmsg=edfmt("Terminated by signal ",st-256,"");
+  else edmsg=edfmt("Exit code ",st,"");
+  return 0;
+}
+
+/* F9: save, build, and land on the first error; Ctrl-F9 (run=1) then runs
+   the program a clean build made */
+func edbuild(run:int)
 {
   var rc:int;
   edsel=0;
@@ -673,6 +698,7 @@ func edbuild()
   if(rc==0)
   {
     edmsg="Build OK";
+    if(run)edrun();
     return 0;
   }
   edmsg="Build failed";
@@ -819,7 +845,17 @@ func edcmd(c:int)
     edproject(0);
     edmsg="Project closed";
   }
-  else if(c==CM_BUILD)return edbuild();
+  else if(c==CM_BUILD)return edbuild(0);
+  else if(c==CM_RUN)return edbuild(1);
+  else if(c==CM_USER)
+  {
+    if(tuiuser()==K_EOF)return edeof();
+  }
+  else if(c==CM_ARGS)
+  {
+    r=dlgline("Arguments","Program arguments",edargs,ED_ARGS);
+    if(r<0)return edeof();
+  }
   else if(c==CM_NEXTERR)return edjump(bmnext(1));
   else if(c==CM_PREVERR)return edjump(bmnext(0-1));
   else if(c==CM_MSGS)edpane=!edpane;
@@ -868,6 +904,8 @@ func edkey(k:int)
   if(k==K_F2)return edcmd(CM_SAVE);
   if(k==K_F3)return edcmd(CM_OPEN);
   if(k==K_F9)return edcmd(CM_BUILD);
+  if(k==K_CTRL+K_F9)return edcmd(CM_RUN);
+  if(k==K_ALT+K_F5)return edcmd(CM_USER);
   if(k==K_ALT+K_F8)return edcmd(CM_NEXTERR);
   if(k==K_ALT+K_F7)return edcmd(CM_PREVERR);
   if(k==12)return edcmd(CM_AGAIN);            /* Ctrl-L */
@@ -981,6 +1019,10 @@ func edmenus()
   mnitem(0,"",0);
   mnitem("~P~revious error","Alt-F7",CM_PREVERR);
   mnitem("~N~ext error","Alt-F8",CM_NEXTERR);
+  mnbegin("~R~un");
+  mnitem("~R~un","Ctrl-F9",CM_RUN);
+  mnitem("~U~ser screen","Alt-F5",CM_USER);
+  mnitem("~A~rguments...","",CM_ARGS);
   mnbegin("~C~ompile");
   mnitem("~B~uild","F9",CM_BUILD);
   mnitem("~M~essages","",CM_MSGS);
@@ -1029,7 +1071,7 @@ func main(argc:int,argv:**char)
   }
   edcy=0;edcx=0;edtop=0;edleft=0;edmsg=0;edquit=0;edrc=0;
   edsel=0;edclip=0;edfind[0]=0;edpane=0;edptop=0;edkind=EK_NONE;
-  edrepl[0]=0;edlastrep=0;
+  edrepl[0]=0;edlastrep=0;edargs[0]=0;
   bmsel=0-1;
   if(tuiinit())return 2;
   edshow();

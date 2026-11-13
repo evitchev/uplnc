@@ -1014,7 +1014,7 @@ What turns a teaching compiler into something you'd build a project with:
       `[15]` drives menus, dialogs, selection, search, Open/Save as, and
       real builds on a pseudo-terminal, asserting on open menus and dialogs
       through a new snapshot mark in `ptyrun.py`/`screen.py`.
-    - 🟡 **Phase 1 slice 1c: undo, Replace, projects, Run** (2026-11).
+    - ✅ **Phase 1 slice 1c: undo, Replace, projects, Run** (2026-11).
       **Undo/redo** is in the buffer: each text-changing primitive logs
       itself before acting, so no command can bypass it; the editor marks
       where a step ends (one command, or a run of typing, Backspaces, or
@@ -1026,8 +1026,17 @@ What turns a teaching compiler into something you'd build a project with:
       one unit per line, relative to the project file, all built by F9 into
       the program named after it; `ed app.prj` or Project/Open project sets
       one, and an error in an unopened unit opens it. `ide/ed.prj` lets the
-      IDE rebuild itself, which `[15]` proves. Still to come: Run (Ctrl-F9)
-      (IDE.md §7).
+      IDE rebuild itself, which `[15]` proves. **Run** (Ctrl-F9) builds, then
+      hands the program the terminal itself and takes it back, reporting the
+      exit code or signal; Alt-F5 shows the user screen it wrote, and
+      Run/Arguments sets its arguments. The shim's new `tsh_spawn` ignores
+      SIGINT/SIGQUIT while waiting, as `system()` does, so Ctrl-C stops the
+      program, not the IDE; `tsh_rawon` keeps the first saved termios, so a
+      program cannot change what the IDE restores at exit. Tests: `shimtest`
+      covers `tsh_spawn` on every backend; `[15]` reads a program's output
+      off the user screen (`screen.py --alt`), passes quoted arguments, and
+      stops a spinning program with a real Ctrl-C (`ptyrun.py ctty`). Not
+      yet: case-insensitive search; incremental project builds (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array

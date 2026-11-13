@@ -2786,7 +2786,7 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
     python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_menu.bin" \
         > "$TMPD/uplnc_ed_menu2.screen"
     if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_menu.err" \
-            && grep -q '^ *File  Edit  Search  Compile' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q '^ *File  Edit  Search  Run  Compile  Project$' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Open\.\.\. *F3 x' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Exit *Alt-X x' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Undo *Alt-BkSp x' "$TMPD/uplnc_ed_menu2.screen" \
@@ -3058,6 +3058,51 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
         ok "editor builds itself from ide/ed.prj"
     else
         bad "editor self-build from ide/ed.prj"
+    fi
+    # Run (Ctrl-F9 = CSI 20;5~) builds, gives the program the terminal, and
+    # takes it back with the exit code on the status line. Alt-F5 (CSI 15;3~)
+    # shows the screen the program wrote -- the primary one, which --alt
+    # models -- until a key; Run/Arguments sets what it is passed, a quoted
+    # stretch being one argument.
+    printf 'func puts(s:*char);\nfunc main(argc:int,argv:**char)\n{\n  puts("hello from run");\n  return 40+argc;\n}\n' \
+        > "$TMPD/uplnc_ed_run.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_run.e" w:1b5b32303b357e "u:Exit code 41" s \
+        w:1b5b31353b337e s w:20 s w:1b72 w:61 w:$(edhex 'x "y z"') w:0d \
+        w:1b5b32303b357e "u:Exit code 43" w:1b78 \
+        > "$TMPD/uplnc_ed_run.bin" 2> "$TMPD/uplnc_ed_run.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run1.screen"
+    python3 tests/screen.py 24x80 --snap 2 --alt < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run2.screen"
+    python3 tests/screen.py 24x80 --snap 3 < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run3.screen"
+    python3 tests/screen.py 24x80 < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run4.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_run.err" \
+            && grep -q '^ L1 C1  *Exit code 41$' "$TMPD/uplnc_ed_run1.screen" \
+            && [ "$(grep -v '^$' "$TMPD/uplnc_ed_run2.screen")" = "hello from run" ] \
+            && grep -q '^ *File  Edit  Search  Run' "$TMPD/uplnc_ed_run3.screen" \
+            && ! grep -q '^hello from run$' "$TMPD/uplnc_ed_run3.screen" \
+            && grep -q '^ L1 C1  *Exit code 43$' "$TMPD/uplnc_ed_run4.screen"; then
+        ok "editor runs the program, shows its screen, and passes arguments"
+    else
+        bad "editor Run / user screen / arguments"
+    fi
+    # Ctrl-C ends a running program but not the IDE, which ignores SIGINT
+    # while it waits. ctty makes the pty the controlling terminal, so the
+    # ^C becomes SIGINT for the foreground group, as at a real terminal.
+    printf 'func puts(s:*char);\nfunc main()\n{\n  puts("spinning");\n  while(1);\n  return 0;\n}\n' \
+        > "$TMPD/uplnc_ed_spin.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 ctty \
+        "a:$TMPD/uplnc_ed_spin.e" w:1b5b32303b357e u:spinning w:03 \
+        "u:Terminated by signal" w:1b78 2> "$TMPD/uplnc_ed_spin.err" \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_spin.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_spin.err" \
+            && grep -q '^ L1 C1  *Terminated by signal 2$' "$TMPD/uplnc_ed_spin.screen"; then
+        ok "editor Run: Ctrl-C stops the program, not the IDE"
+    else
+        bad "editor Run Ctrl-C"
     fi
 else
     echo "  skip - editor tests need python3 and a native build"

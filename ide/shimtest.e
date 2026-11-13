@@ -4,7 +4,9 @@
    read whose -1 must arrive sign-extended -- the exact class of bug cint.he
    exists for. Then the IDE's build runner: captured stdout+stderr, the exit
    status, a killed child, a program that cannot be executed, output past
-   the buffer dropped, and the machine name. Exit 42.
+   the buffer dropped, and the machine name. Then Run's tsh_spawn: the exit
+   status, a signal, SIGINT's default restored in the child but ignored by
+   the waiting parent, and a program that cannot be executed. Exit 42.
 
    Build: perl src/langdrv.pl -march=ARCH -o shimtest ide/shimtest.e ide/tshim.c */
 
@@ -15,6 +17,7 @@ func tsh_poll(fd:int,ms:int);
 func tsh_close(fd:int);
 func tsh_run(argv:**char,out:*char,cap:int,outn:*int);
 func tsh_machine(buf:*char,cap:int);
+func tsh_spawn(argv:**char);
 
 func main()
 {
@@ -56,5 +59,20 @@ func main()
   if((n<10)||(out[0]!='c'))return 19;  /* "cannot run ..." */
   if(tsh_machine(out,64)<0)return 20;
   if(!out[0])return 21;
+  av[0]="sh";
+  av[1]="-c";
+  av[2]="exit 3";
+  av[3]=0;
+  if(tsh_spawn(av)!=3)return 22;
+  av[2]="kill -9 $$";
+  if(tsh_spawn(av)!=265)return 23;     /* 256 + SIGKILL */
+  av[2]="kill -INT $$; exit 7";         /* SIGINT is the child's again */
+  if(tsh_spawn(av)!=258)return 24;
+  av[2]="kill -INT $PPID; exit 5";      /* ... but not this process's */
+  if(tsh_spawn(av)!=5)return 25;
+  tsh_close(2);                         /* its "cannot run" goes nowhere */
+  av[0]="/nonexistent/uplnc-no-such-program";
+  av[1]=0;
+  if(tsh_spawn(av)!=127)return 26;
   return 42;
 }

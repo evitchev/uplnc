@@ -18,10 +18,15 @@
    source line and its caret, the driver's summary, linker output) is shown
    as context but skipped by next/previous error. A location is shown from
    its file's base name on (bmshow), so the message itself stays on screen,
-   and when langc's caret line follows it, its column is kept too. */
+   and when langc's caret line follows it, its column is kept too.
+
+   Run: bdspawn starts the program the last build made on the IDE's own
+   terminal through the shim's tsh_spawn, once the editor has handed the
+   terminal over. */
 
 func tsh_run(argv:**char,out:*char,cap:int,outn:*int);
 func tsh_machine(buf:*char,cap:int);
+func tsh_spawn(argv:**char);
 func fopen(n:*char,m:*char):*int;
 func fgetc(fp:*int);
 func fclose(fp:*int);
@@ -36,6 +41,7 @@ var extern stderr:*int;
 
 #define BM_CAP 65536     /* captured build output kept per build, in bytes */
 #define BD_LINE 1024     /* the longest project line kept, with its NUL */
+#define BD_ARGS 128      /* the most arguments Run passes a program */
 
 var bmbuf:*char;         /* the captured output, its lines NUL-terminated */
 var bmtext:**char;       /* each message line */
@@ -442,4 +448,45 @@ func bmnext(d:int)
     i=i+d;
   }
   return 0-1;
+}
+
+/* Run the program the last build made, with args split at blanks (a
+   "double-quoted" stretch keeps its blanks; arguments past BD_ARGS are
+   dropped), on the terminal the caller has handed over: its exit status,
+   256+signal if a signal ended it, or -1 if it could not be started. */
+func bdspawn(args:*char)
+{
+  var [BD_ARGS+2]*char:av;
+  var p:*char;
+  var i,n,ac,q,rc:int;
+  if(!bmexe)return 0-1;
+  p=malloc(bmlen(bmexe)+2*bmlen(args)+8);
+  if(!p)bmoom();
+  /* a program name without a directory would be looked for on PATH */
+  n=0;
+  q=0;
+  for(i=0;bmexe[i];i++)if(bmexe[i]=='/')q=1;
+  if(!q)n=bdcat(p,0,"./");
+  n=bdcat(p,n,bmexe)+1;
+  av[0]=p;
+  ac=1;
+  i=0;
+  while(ac<=BD_ARGS)
+  {
+    while((args[i]==' ')||(args[i]==9))i++;
+    if(!args[i])break;
+    av[ac++]=p+n;
+    q=0;
+    while(args[i]&&(q||((args[i]!=' ')&&(args[i]!=9))))
+    {
+      if(args[i]=='"')q=!q;
+      else p[n++]=args[i];
+      i++;
+    }
+    p[n++]=0;
+  }
+  av[ac]=0;
+  rc=tsh_spawn(av);
+  free(p);
+  return rc;
 }

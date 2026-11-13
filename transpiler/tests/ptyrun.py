@@ -2,9 +2,11 @@
 # of events, and write everything it printed to stdout; the exit status and
 # whether the termios state was restored exactly go to stderr.
 #
-#   ptyrun.py BIN ROWSxCOLS [a:ARG ...]
+#   ptyrun.py BIN ROWSxCOLS [ctty] [a:ARG ...]
 #             [w:HEXBYTES | p | s | u:TEXT | z:ROWSxCOLS ...]
 #
+#     ctty    make the terminal the program's controlling terminal, so a
+#             Ctrl-C written to it in cooked mode arrives as SIGINT
 #     a:ARG   pass ARG to the program (before any event)
 #     w:HEX   write these bytes to its terminal, then let it settle
 #     p       just let it settle
@@ -24,8 +26,11 @@ m, s = pty.openpty()
 fcntl.ioctl(m, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
 before = termios.tcgetattr(s)
 args = [binpath] + [a[2:] for a in sys.argv[3:] if a.startswith('a:')]
-ops = [a for a in sys.argv[3:] if not a.startswith('a:')]
-p = subprocess.Popen(args, stdin=s, stdout=s, stderr=s, start_new_session=True)
+ops = [a for a in sys.argv[3:] if not a.startswith('a:') and a != 'ctty']
+def takectty():          # runs in the child, after start_new_session's setsid
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+p = subprocess.Popen(args, stdin=s, stdout=s, stderr=s, start_new_session=True,
+                     preexec_fn=takectty if 'ctty' in sys.argv[3:] else None)
 out = b''
 SNAP = screen.SNAP       # never emitted by a program: NUL is not drawn
 def drain(t=0.35):

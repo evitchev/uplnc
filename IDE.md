@@ -1,7 +1,7 @@
 # A Turbo-style IDE in UPLNC — feasibility assessment and design plan
 
 Assessed 2026-07. Status: **in progress; phase 1 landed** (slice 1a 2026-08,
-slice 1b 2026-10) —
+slice 1b 2026-10, slice 1c 2026-11) —
 this document records the settled design and its implementation progress (the
 ROADMAP links here from the M6 tooling item). The goal: a full-screen text-mode
 IDE in the spirit
@@ -234,7 +234,8 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      tool, a snapshot mark (`ptyrun.py`'s `s`, `screen.py --snap N`), to
      assert on a menu or dialog while it is open; build results are read
      from the final screen instead, so a slow build cannot race them.
-   - **Slice 1c: undo, Replace, projects, Run** (2026-11, in progress).
+   - ✅ **Slice 1c: undo, Replace, projects, Run** (2026-11), the items
+     slice 1b left.
      **Undo/redo** lives in the buffer, not the editor: every primitive that
      changes text logs itself (`ulog`) before acting, so no editing command
      can bypass undo, and the editor only marks where one undo step ends
@@ -266,7 +267,40 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      inside -- `[15]` does exactly that, from a copy of `ide/`. For such
      steps `ptyrun.py` gained `u:TEXT`, a wait for text on the rendered
      screen, instead of trusting a fixed delay to outlast a build.
-   - **Not yet**: Run (Ctrl-F9) and case-insensitive search.
+     **Run** (Ctrl-F9, or the new Run menu) builds as F9 does, then gives
+     the program the terminal itself: the IDE leaves raw mode and the
+     alternate screen, so the program writes to the shell's own screen --
+     the user screen, as Turbo's was DOS's -- and when it ends the IDE takes
+     the terminal back and reports its exit code, or the signal that ended
+     it, on the status line. Alt-F5 shows that screen until a key is
+     pressed, and Run/Arguments sets the program's arguments (split at
+     blanks; a "double-quoted" stretch is one argument). The shim's new
+     `tsh_spawn` waits as `system()` does, ignoring SIGINT and SIGQUIT
+     while the program runs, so Ctrl-C ends the program and not the IDE;
+     `tsh_rawon` now saves the terminal's state only the first time, so a
+     program that leaves the terminal in an odd mode cannot change what the
+     IDE restores at exit; and `tuiinit` can take the terminal back after
+     `tuidone` (it used to leak its output buffer on a second call).
+     `shimtest.e` proves `tsh_spawn`'s statuses and both halves of the
+     signal handling on every backend with a toolchain; `[15]` runs a
+     program, reads its output off the user screen (`screen.py --alt`
+     models the primary and alternate screens apart), passes it quoted
+     arguments, and stops a spinning one with a real Ctrl-C (`ptyrun.py`'s
+     `ctty` makes the pty the controlling terminal).
+   - **Findings**: undo belongs in the buffer. Logging there, before each
+     primitive acts, makes completeness structural -- paste, cut, Replace
+     and every later command are undoable without knowing about undo --
+     and it is what makes undo provable on all five backends without a
+     terminal. Everything else came from the terminal boundary, as §2.1
+     predicted: handing the terminal to a child and back is three shim
+     facts (who ignores which signal, which termios to restore, when to
+     discard typed-ahead input), and testing it needed the harness to
+     model what a real terminal does -- two screens, a controlling tty --
+     rather than the IDE to change.
+   - **Not yet**: case-insensitive search; Redo has no key (Turbo's
+     Shift-Alt-Backspace is indistinguishable from Alt-Backspace in common
+     terminals); a project always rebuilds every unit (Turbo's Make
+     compared times; the driver has no incremental mode yet).
 3. **Phase 2**: gdb/MI debugging — structured MI parser, dedicated inferior
    PTY and console pane, breakpoint margin, F7/F8, watch and call-stack
    windows.
