@@ -1052,6 +1052,11 @@ What turns a teaching compiler into something you'd build a project with:
       off the user screen (`screen.py --alt`), passes quoted arguments, and
       stops a spinning program with a real Ctrl-C (`ptyrun.py ctty`). Not
       yet: case-insensitive search; incremental project builds (IDE.md §7).
+    - 🟡 **Phase 2 slice 2a: the gdb/MI parser and a gdb session**
+      (2026-11). `mi.e` parses gdb's machine-interface records into tuples
+      and lists walked by dotted path, and turns anything else into a
+      plain-text record; `[16]` proves it on all five backends. Next in
+      the slice: the session itself (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array

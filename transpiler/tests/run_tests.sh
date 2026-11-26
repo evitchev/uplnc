@@ -3148,6 +3148,51 @@ else
     echo "  skip - editor tests need python3 and a native build"
 fi
 
+echo "[16] IDE debugger: the gdb/MI parser"
+# The MI parser is pure logic, so it is proved on every backend with a
+# toolchain: mitest.e parses real and malformed records.
+for spec in "mitest:../ide/mitest.e ../ide/mi.e:MI parser"; do
+    name=${spec%%:*}; rest=${spec#*:}
+    srcs=${rest%%:*}; what=${rest#*:}
+    if [ -z "$TUIHOST" ]; then
+        echo "  skip - no native UPLNC target for host $(uname -m)"
+    # shellcheck disable=SC2086
+    elif hostbuild "$TMPD/uplnc_$name" $srcs >/dev/null 2>&1 \
+            && "$TMPD/uplnc_$name"; [ $? = 42 ]; then
+        ok "$what ($TUIHOST native)"
+    else
+        bad "$what $TUIHOST native"
+    fi
+    for xspec in "arm64:aarch64-linux-gnu-gcc:qemu-aarch64-static" \
+                 "riscv64:riscv64-linux-gnu-gcc:qemu-riscv64-static" \
+                 "mips64:mips64-linux-gnuabi64-gcc:${QEMU_MIPS:-qemu-mips64-static}"; do
+        xarch=${xspec%%:*}; xrest=${xspec#*:}
+        xcc=${xrest%%:*}; xrun=${xrest#*:}
+        [ "$xarch" = "$TUIHOST" ] && continue
+        if ! command -v "$xcc" >/dev/null || ! command -v "${xrun%% *}" >/dev/null; then
+            echo "  skip - no $xarch cross toolchain + qemu"
+            continue
+        fi
+        # shellcheck disable=SC2086
+        if perl "$DRIVER" "-march=$xarch" -o "$TMPD/uplnc_${name}_$xarch" $srcs \
+                >/dev/null 2>&1; then
+            $xrun "$TMPD/uplnc_${name}_$xarch"
+            [ $? = 42 ] && ok "$what: $xarch (qemu)" || bad "$what $xarch"
+        else
+            bad "$what build $xarch"
+        fi
+    done
+    if [ "$TUIHOST" = x86_64 ]; then
+        # shellcheck disable=SC2086
+        if perl "$DRIVER" -march=i386 -o "$TMPD/uplnc_${name}32" $srcs >/dev/null 2>&1; then
+            "$TMPD/uplnc_${name}32"
+            [ $? = 42 ] && ok "$what: i386" || bad "$what i386"
+        else
+            echo "  skip - $what: no i386 toolchain"
+        fi
+    fi
+done
+
 echo
 echo "==== $pass passed, $fail failed ===="
 [ "$fail" -eq 0 ]
