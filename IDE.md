@@ -320,7 +320,11 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      stays queued for the UI. The debugged program gets a pseudo-terminal
      of its own (`-inferior-tty-set`), so its output and input never touch
      the MI stream. The shim gained `tsh_child` (the two pipes, close-on-
-     exec, a session of its own), `tsh_wait`, `tsh_kill` and `tsh_openpty`.
+     exec, a session of its own), `tsh_wait`, `tsh_kill`, `tsh_openpty`,
+     and `tsh_clock`, a monotonic clock that every wait runs against: the
+     first version, with no clock, estimated time from what gdb sent, so a
+     wait ran long while records poured in and ended early while one
+     trickled in (found in review; `gdbtest.e` now checks both).
      Tests in `[16]`: `mitest.e` proves the parser on all five backends
      without gdb (real gdb 10.2 records, every escape, 27 kinds of
      malformed line, the nesting limit, a 100,000-byte line); `gdbtest.e`

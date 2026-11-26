@@ -1,8 +1,9 @@
 /* gdb.e: one gdb session. See gdb.he for the shape.
 
-   Waiting: the shim has no clock, so result() and wait() count their
-   budget down by each poll's timeout when nothing arrived, and by 1 when
-   something did, so a gdb that keeps talking cannot hold them forever.
+   Waiting: every wait -- start's first prompt, result(), wait(), stop's
+   exit -- runs against the shim's monotonic clock (tsh_clock): it polls
+   for the time left, checks the queue after each read, and gives up when
+   the time is spent, however much or little gdb says meanwhile.
 
    Quoting: a command argument that may hold blanks or quotes -- the
    program's path, the pty's -- is sent as an MI C string (gdquote). */
@@ -22,8 +23,7 @@ func tsh_poll(fd:int,ms:int);
 func tsh_read(fd:int,buf:*char,n:int);
 func tsh_write(fd:int,buf:*char,n:int);
 func tsh_close(fd:int);
-
-#define GD_TICK 50       /* ms per poll while waiting */
+func tsh_clock();
 
 func gdoom()
 {
@@ -45,6 +45,15 @@ func gdeq(a:*char,b:*char)
   i=0;
   while(a[i]&&(a[i]==b[i]))i++;
   return a[i]==b[i];
+}
+
+/* what is left of a wait of ms that began at t0 (tsh_clock), or 0 */
+func gdleft(t0:int,ms:int)
+{
+  var e:int;
+  e=tsh_clock()-t0;
+  if(e>=ms)return 0;
+  return ms-e;
 }
 
 /* an MI number: gdb prints most in decimal, but an exit-code in octal
@@ -128,7 +137,7 @@ method sgdb.start(prog:*char,gdb:*char)
   var [2]int:fds;
   var r:*mirec;
   var cmd:*char;
-  var ms,ok:int;
+  var t0,left,ok:int;
   this->init();
   pty=tsh_openpty(ptyname,GD_PTYNAME,&this->ptys);
   if(pty<0)return 0-1;
@@ -147,17 +156,22 @@ method sgdb.start(prog:*char,gdb:*char)
   out=fds[1];
   /* gdb announces itself with a few records and a first prompt */
   ok=0;
-  for(ms=10000;(ms>0)&&!ok;ms=ms-GD_TICK)
+  t0=tsh_clock();
+  while(!ok)
   {
-    if(this->poll(GD_TICK)<0)return 0-3;
     r=this->find(MR_PROMPT,0,0);
     if(r)
     {
       r->done();
       ok=1;
     }
+    else
+    {
+      left=gdleft(t0,10000);
+      if(!left)return 0-3;
+      if(this->poll(left)<0)return 0-3;
+    }
   }
-  if(!ok)return 0-3;
   r=this->result("-gdb-set confirm off",10000);
   if((!r)||!gdeq(r->cls,"done"))ok=0;
   if(r)r->done();
@@ -315,36 +329,34 @@ method sgdb.find(t:int,cls:*char,tk:int):*mirec
 method sgdb.result(cmd:*char,ms:int):*mirec
 {
   var r:*mirec;
-  var t,g:int;
+  var t,t0,left:int;
   t=this->send(cmd);
   if(t<0)return 0;
-  while(ms>0)
+  t0=tsh_clock();
+  while(1)
   {
     r=this->find(MR_RESULT,0,t);
     if(r)return r;
-    g=this->poll(GD_TICK);
-    if(g<0)return this->find(MR_RESULT,0,t);
-    if(g)ms--;
-    else ms=ms-GD_TICK;
+    left=gdleft(t0,ms);
+    if(!left)return 0;
+    if(this->poll(left)<0)return this->find(MR_RESULT,0,t);
   }
-  return 0;
 }
 
 /* wait up to ms for a record of type t and class cls (any if 0) */
 method sgdb.wait(t:int,cls:*char,ms:int):*mirec
 {
   var r:*mirec;
-  var g:int;
-  while(ms>0)
+  var t0,left:int;
+  t0=tsh_clock();
+  while(1)
   {
     r=this->find(t,cls,0);
     if(r)return r;
-    g=this->poll(GD_TICK);
-    if(g<0)return this->find(t,cls,0);
-    if(g)ms--;
-    else ms=ms-GD_TICK;
+    left=gdleft(t0,ms);
+    if(!left)return 0;
+    if(this->poll(left)<0)return this->find(t,cls,0);
   }
-  return 0;
 }
 
 /* what the program printed, up to cap bytes, waiting up to ms for any */
@@ -369,14 +381,20 @@ method sgdb.ptywrite(s:*char,n:int)
 method sgdb.stop()
 {
   var r:*mirec;
-  var st,ms:int;
+  var st,t0,left:int;
   st=0-1;
   if(pid)
   {
     if(!dead)this->send("-gdb-exit");
     tsh_close(in);
     in=0-1;
-    for(ms=5000;(ms>0)&&!dead;ms=ms-GD_TICK)this->poll(GD_TICK);
+    t0=tsh_clock();
+    while(!dead)
+    {
+      left=gdleft(t0,5000);
+      if(!left)break;
+      this->poll(left);
+    }
     if(!dead)tsh_kill(pid,9);
     st=tsh_wait(pid,1);
     pid=0;

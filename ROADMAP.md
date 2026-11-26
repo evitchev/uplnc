@@ -1102,8 +1102,9 @@ What turns a teaching compiler into something you'd build a project with:
       and a real breakpoint-run-step-exit session where gdb is installed,
       which CI's two test jobs now do (so `[12]`'s debugger checks run
       there too). Every child the shim starts now gets SIGPIPE's default
-      back. Next: slice 2b, breakpoints and stepping in the editor
-      (IDE.md §7).
+      back. Every wait runs against a monotonic clock (`tsh_clock`; a
+      review found the first version counting records, not time). Next:
+      slice 2b, breakpoints and stepping in the editor (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array
