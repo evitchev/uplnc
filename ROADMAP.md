@@ -1076,7 +1076,9 @@ What turns a teaching compiler into something you'd build a project with:
       what Ctrl-L repeats after it. **Projects** are Turbo C 2.0's text .PRJ:
       one unit per line, relative to the project file, all built by F9 into
       the program named after it; `ed app.prj` or Project/Open project sets
-      one, and an error in an unopened unit opens it. `ide/ed.prj` lets the
+      one, and an error in an unopened unit opens it (a review fix: a
+      project build that cannot start no longer leaves the last program's
+      name freed, which the next build freed again). `ide/ed.prj` lets the
       IDE rebuild itself, which `[15]` proves. **Run** (Ctrl-F9) builds, then
       hands the program the terminal itself and takes it back, reporting the
       exit code or signal; Alt-F5 shows the user screen it wrote, and

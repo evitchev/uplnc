@@ -381,7 +381,7 @@ func bdrun(file:*char)
 {
   var av:**char;
   var [80]char:march;
-  var drv,prj:*char;
+  var drv,prj,exe:*char;
   var n,rc,i:int;
   bmclear();
   if(!bmbuf)
@@ -396,20 +396,23 @@ func bdrun(file:*char)
   }
   prj=bdprj;
   if((!prj)&&bdext(file,".prj"))prj=file;
-  if(bmexe)free(bmexe);
   if(prj)
   {
     n=bdunits(prj);
     if(n<0)return bdfail("cannot read project file ",prj);
     if(!n)return bdfail("no units listed in project file ",prj);
-    bmexe=bdexe(prj,".prj");
+    exe=bdexe(prj,".prj");
   }
   else
   {
     bdfreeunits();
     bdaddunit("",0,file,bmlen(file));
-    bmexe=bdexe(file,".e");
+    exe=bdexe(file,".e");
   }
+  /* replaced only now: a build that could not start keeps the last name,
+     rather than a freed one the next build would free again */
+  if(bmexe)free(bmexe);
+  bmexe=exe;
   bdcat(march,bdcat(march,0,"-march="),bdmarch());
   av=malloc((bdnu+6)*sizeof(*char));
   if(!av)bmoom();
