@@ -27,6 +27,10 @@ func tsh_child(argv:**char,fds:*int);
 func tsh_wait(pid:int,hang:int);
 func tsh_kill(pid:int,sig:int);
 func tsh_openpty(name:*char,cap:int,slave:*int);
+func signal(sig:int,handler:int);
+
+#define SIGPIPE 13       /* on every Linux target, MIPS included */
+#define SIG_DFL 0
 
 /* read fd until EOF, up to cap bytes, waiting at most 5 s for each */
 func rdall(fd:int,buf:*char,cap:int)
@@ -49,6 +53,10 @@ func main()
   var [4]*char:av;
   var [64]char:out;
   var i,r,n,pid,m,sl:int;
+  /* GitHub's runners start jobs with SIGPIPE ignored, and the shim hands
+     its children whatever this process started with; start from the
+     default, so the checks that children get SIGPIPE back mean something */
+  signal(SIGPIPE,SIG_DFL);
   if(tsh_pipe(fds))return 1;
   if(fds[0]==fds[1])return 2;          /* two distinct full-width values */
   for(i=0;i<8;i++)buf[i]='A'+i;
