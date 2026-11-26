@@ -7,7 +7,9 @@
  * same cc that links the target (langdrv.pl accepts .c inputs), so cross
  * builds get the target's own libc definitions of these structs.
  */
+#define _GNU_SOURCE             /* posix_openpt and friends, cfmakeraw */
 #include <stdint.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -22,6 +24,27 @@
 static struct termios tsh_saved;
 static intptr_t tsh_have_saved = 0;
 static volatile sig_atomic_t tsh_winch = 0;
+static struct sigaction tsh_oldpipe;
+static intptr_t tsh_pipe_off = 0;
+
+/* Once the IDE writes to a child (tsh_child), a write after that child has
+ * died must fail with EPIPE rather than kill the IDE: SIGPIPE is ignored
+ * from then on. An ignored signal stays ignored across exec, so every child
+ * the shim starts puts the old disposition back first (tsh_childpipe). */
+static void tsh_nopipe(void)
+{
+    struct sigaction ign;
+    if (tsh_pipe_off) return;
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    ign.sa_flags = 0;
+    if (sigaction(SIGPIPE, &ign, &tsh_oldpipe) == 0) tsh_pipe_off = 1;
+}
+
+static void tsh_childpipe(void)
+{
+    if (tsh_pipe_off) sigaction(SIGPIPE, &tsh_oldpipe, 0);
+}
 
 /* enter raw mode on stdin, saving the exact prior state; 0 ok, -1 error.
  * Only the first call saves: entering raw mode again after a program the
@@ -164,6 +187,7 @@ intptr_t tsh_run(char *const *argv, char *out, intptr_t cap, intptr_t *outn)
     }
     if (pid == 0) {
         static const char msg[] = "cannot run ";
+        tsh_childpipe();
         nul = open("/dev/null", O_RDONLY);
         if (nul > 0) {
             dup2(nul, 0);
@@ -224,6 +248,7 @@ intptr_t tsh_spawn(char *const *argv)
         static const char msg[] = "cannot run ";
         sigaction(SIGINT, &oldint, 0);
         sigaction(SIGQUIT, &oldquit, 0);
+        tsh_childpipe();
         execvp(argv[0], argv);
         (void)!write(2, msg, sizeof msg - 1);
         (void)!write(2, argv[0], strlen(argv[0]));
@@ -243,6 +268,115 @@ intptr_t tsh_spawn(char *const *argv)
     sigaction(SIGINT, &oldint, 0);
     sigaction(SIGQUIT, &oldquit, 0);
     return r;
+}
+
+/* Start argv (argv[0] found on PATH) as a child the IDE talks to -- the
+ * debugger. Its stdin is a pipe whose write end goes into fds[0]; its stdout
+ * and stderr share one pipe whose read end goes into fds[1]. Both ends are
+ * close-on-exec, so later children (a build, Run) do not hold them open. The
+ * child gets a session of its own: it has no controlling terminal, so
+ * nothing typed at the IDE reaches it. Returns its pid, or -1; a program
+ * that cannot be executed says so on its output and exits 127. */
+intptr_t tsh_child(char *const *argv, intptr_t *fds)
+{
+    int in[2], out[2], a, b;
+    pid_t pid;
+    if (pipe(in) != 0) return -1;
+    if (pipe(out) != 0) {
+        close(in[0]);
+        close(in[1]);
+        return -1;
+    }
+    tsh_nopipe();
+    pid = fork();
+    if (pid < 0) {
+        close(in[0]);
+        close(in[1]);
+        close(out[0]);
+        close(out[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        static const char msg[] = "cannot run ";
+        tsh_childpipe();
+        setsid();
+        /* above 2 first: with a standard descriptor closed, a pipe end can
+           be 0, 1 or 2, and the dup2s would overwrite one another */
+        a = fcntl(in[0], F_DUPFD, 3);
+        b = fcntl(out[1], F_DUPFD, 3);
+        dup2(a, 0);
+        dup2(b, 1);
+        dup2(b, 2);
+        close(a);
+        close(b);
+        if (in[0] > 2) close(in[0]);
+        if (in[1] > 2) close(in[1]);
+        if (out[0] > 2) close(out[0]);
+        if (out[1] > 2) close(out[1]);
+        execvp(argv[0], argv);
+        (void)!write(2, msg, sizeof msg - 1);
+        (void)!write(2, argv[0], strlen(argv[0]));
+        (void)!write(2, "\n", 1);
+        _exit(127);
+    }
+    close(in[0]);
+    close(out[1]);
+    fcntl(in[1], F_SETFD, FD_CLOEXEC);
+    fcntl(out[0], F_SETFD, FD_CLOEXEC);
+    fds[0] = (intptr_t)in[1];
+    fds[1] = (intptr_t)out[0];
+    return (intptr_t)pid;
+}
+
+/* Has child pid ended? With hang 0, -2 while it still runs; otherwise wait
+ * for it. Returns the exit status (0-255), 256+signal, or -1 (no such
+ * child). */
+intptr_t tsh_wait(intptr_t pid, intptr_t hang)
+{
+    int st;
+    pid_t r;
+    for (;;) {
+        r = waitpid((pid_t)pid, &st, hang ? 0 : WNOHANG);
+        if (r == 0) return -2;
+        if (r > 0) break;
+        if (errno != EINTR) return -1;
+    }
+    if (WIFEXITED(st)) return WEXITSTATUS(st);
+    if (WIFSIGNALED(st)) return 256 + WTERMSIG(st);
+    return -1;
+}
+
+intptr_t tsh_kill(intptr_t pid, intptr_t sig)
+{
+    return kill((pid_t)pid, (int)sig) != 0 ? -1 : 0;
+}
+
+/* A pseudo-terminal for the program being debugged: returns the master
+ * side's descriptor, puts the slave's path into name (NUL-terminated, at
+ * most cap bytes) and its descriptor into *slave. The caller keeps the
+ * slave open, so the master never reads a hangup while no program has it
+ * open, between runs. Both are close-on-exec. -1 on error. */
+intptr_t tsh_openpty(char *name, intptr_t cap, intptr_t *slave)
+{
+    int m, sl;
+    char *p;
+    m = posix_openpt(O_RDWR | O_NOCTTY);
+    if (m < 0) return -1;
+    if (grantpt(m) != 0 || unlockpt(m) != 0 || (p = ptsname(m)) == 0
+            || (intptr_t)strlen(p) >= cap) {
+        close(m);
+        return -1;
+    }
+    strcpy(name, p);
+    sl = open(name, O_RDWR | O_NOCTTY);
+    if (sl < 0) {
+        close(m);
+        return -1;
+    }
+    fcntl(m, F_SETFD, FD_CLOEXEC);
+    fcntl(sl, F_SETFD, FD_CLOEXEC);
+    *slave = (intptr_t)sl;
+    return (intptr_t)m;
 }
 
 /* the kernel's machine name (uname -m) into buf, NUL-terminated and

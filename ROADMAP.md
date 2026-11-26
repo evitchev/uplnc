@@ -1088,6 +1088,20 @@ What turns a teaching compiler into something you'd build a project with:
       off the user screen (`screen.py --alt`), passes quoted arguments, and
       stops a spinning program with a real Ctrl-C (`ptyrun.py ctty`). Not
       yet: case-insensitive search; incremental project builds (IDE.md §7).
+    - ✅ **Phase 2 slice 2a: the gdb/MI parser and a gdb session**
+      (2026-11), the debugger's plumbing below its UI. `mi.e` parses gdb's
+      machine-interface records into tuples and lists walked by dotted
+      path, and turns anything else into a plain-text record; `gdb.e` runs
+      gdb on two pipes through the shim's new `tsh_child` and keeps one
+      session -- tokened commands, an arrival-ordered record queue, waiting
+      for a result or a `*stopped` -- with the debugged program on its own
+      pseudo-terminal (`tsh_openpty`). Tests (`[16]`): the parser and the
+      session's line assembly and queue on all five backends without gdb,
+      and a real breakpoint-run-step-exit session where gdb is installed,
+      which CI's two test jobs now do (so `[12]`'s debugger checks run
+      there too). Every child the shim starts now gets SIGPIPE's default
+      back. Next: slice 2b, breakpoints and stepping in the editor
+      (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array

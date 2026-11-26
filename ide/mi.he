@@ -1,0 +1,63 @@
+/* mi.he: gdb's machine interface (MI) output, parsed (IDE.md section 4).
+
+   gdb --interpreter=mi2 answers on its stdout one record per line:
+
+     [token]^class,results    the result of the command sent with token
+     [token]*class,results    the inferior started or stopped (async)
+     [token]+class,results    progress of a slow command (async)
+     [token]=class,results    breakpoints, threads, libraries changed (async)
+     ~"text"  @"text"  &"text"  console, target and log streams
+     (gdb)                    the end of one batch of output
+
+   A result is name=value; a value is a C string, a tuple {results}, or a
+   list [values] or [results]. miparse turns one line into an mirec whose
+   results hang off a tuple, so rec.get("frame.line") walks it by name (a
+   component of digits indexes a list: "stack.1.line"). A line that is not a
+   well-formed record -- gdb's own stderr, a truncated read -- becomes
+   MR_OTHER carrying the text, never an error the caller must handle. */
+
+/* record types */
+#define MR_RESULT 1      /* ^ */
+#define MR_EXEC 2        /* * */
+#define MR_STATUS 3      /* + */
+#define MR_NOTIFY 4      /* = */
+#define MR_CONSOLE 5     /* ~ */
+#define MR_TARGET 6      /* @ */
+#define MR_LOG 7         /* & */
+#define MR_PROMPT 8      /* (gdb) */
+#define MR_OTHER 9       /* not a record: text holds the line */
+
+/* value kinds */
+#define MV_STR 1         /* a C string, decoded into str */
+#define MV_TUPLE 2       /* {name=value,...}: the elements are kids */
+#define MV_LIST 3        /* [value,...] or [name=value,...]: kids */
+
+#define MI_CLASSZ 32     /* result and async class names, with the NUL */
+#define MI_DEPTH 32      /* tuples and lists nest at most this deep */
+#define MI_TOKLEN 9      /* a token has at most this many digits */
+
+struct mival{
+  int kind;              /* MV_* */
+  *char name;            /* name of a result (name=value), else 0 */
+  *char str;             /* MV_STR: the decoded string */
+  *mival kids;           /* MV_TUPLE, MV_LIST: the first element */
+  *mival next;           /* the next element of the enclosing tuple or list */
+  func done;             /* free this value and its elements */
+  func get:*mival;       /* the element named nm, or 0 */
+  func at:*mival;        /* the element at index i (0-based), or 0 */
+  func count;            /* how many elements */
+  func path:*mival;      /* walk a dotted path of names and indexes, or 0 */
+};
+
+struct mirec{
+  int type;              /* MR_* */
+  int token;             /* the command token, or -1 when there is none */
+  [MI_CLASSZ]char cls;   /* "done", "error", "running", "stopped", ... */
+  *char text;            /* a stream's decoded string; MR_OTHER's line */
+  *mival res;            /* the results: a tuple (with no kids if none) */
+  func done;             /* free the record and everything it holds */
+  func get:*mival;       /* res.path(p) */
+  func str:*char;        /* the string at path p, or 0 if absent or not one */
+};
+
+func miparse(line:*char):*mirec;
