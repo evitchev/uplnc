@@ -222,6 +222,7 @@ struct enode{
   int op;
   eleaf leaf;
   [NAMESIZE]char name;
+  int novalue; /* the value is discarded (expdiscard, comma's left operand): see fpkeep */
 };
 
 struct elval{

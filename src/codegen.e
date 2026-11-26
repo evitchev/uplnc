@@ -2976,6 +2976,7 @@ func cd_write_i386(*scode:this)
   else if(this->code==CD_FINC){ol("fld1");ol("faddp %st, %st(1)");}
   else if(this->code==CD_FDEC){ol("fld1");ol("fsubrp %st, %st(1)");}
   else if(this->code==CD_FDUP)ol("fld %st(0)");
+  else if(this->code==CD_FDROP)ol("fstp %st(0)");
   else if(this->code==CD_F2I)
   {
     /* truncate st0 -> int %eax (round-toward-zero), popping st0. Save the x87
@@ -3673,6 +3674,12 @@ func fdup()             /* i386 x87: duplicate st0 (so the popping store keeps i
   var *scode:cd;
   cd=cg_getitem(ccg);
   cd->code=CD_FDUP;
+}
+func fdrop()            /* i386 x87: pop st0, a value nobody uses */
+{
+  var *scode:cd;
+  cd=cg_getitem(ccg);
+  cd->code=CD_FDROP;
 }
 func savecsr(off:int)   /* x86: save the callee-saved spill regs to frame slots */
 {

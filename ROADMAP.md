@@ -237,6 +237,23 @@ literals are emitted as `.double <text>` so the assembler computes the IEEE bits
   `fildll` of a zero-extended word on i386, the same trick on mips). Nested `?:`
   type propagation fixed in `cttype`. `fp_ternary_nested`/`fp_nan`/`fp_uint`
   golden tests on all five backends; fixpoints byte-identical
+- ✅ x87 stack balance and `float` `++`/`--` (2026-11, found while adding
+  compound assignment). On i386 every FP value takes one of the eight x87
+  slots, but an FP `++`/`--` statement kept a copy nobody popped (eight in a
+  loop overflowed the stack), a discarded FP value (a `double`-returning call
+  statement, a comma's left side) was never popped, and an FP assignment used
+  as a value (`x = (d = 1.5)`) had already been popped by its store.
+  Expression statements and `for` clauses now go through `expdiscard`, which
+  marks the expression `novalue`: an assignment-like node there keeps no copy
+  (`fpkeep`), and any other FP result is popped (new i386-only `CD_FDROP`),
+  while an assignment whose value is used keeps one (`FDUP`). On every
+  backend, `++`/`--` on a `float` stored the double it had loaded (8 bytes
+  into a 4-byte slot), and a `float` assignment's value kept the type `float`
+  although it is held as a double, so `(f = 1.5) + 1.0` miscomputed; both now
+  store at the declared width and type the value `double` (`fpdecay`). In the
+  corpus only i386 FP `++`/`--` statements change (the copy and its
+  correction go); every other unit is byte-identical on all five targets, and
+  all five fixpoints reach. `fp_discard` golden test on all five backends
 - ✅ 64-bit integers (`long long`) — done; see the dedicated section below
 
 ## M4B — 64-bit integers (`long long`) ✅

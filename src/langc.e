@@ -243,6 +243,7 @@ var itreelst:**enode; /* `[]` local init: element trees held until the slot exis
 var nitree,aitree:int;
 var g_vaoff:int;      /* varargs: frame offset of this function's va area (0 = not variadic) */
 var g_stmtexp:int;    /* set by statemen for a bare expression statement (no-effect warning) */
+var g_discard:int;    /* set by expdiscard: expressi's value is dropped */
 var g_stmtclosed:int; /* the current statement consumed its ; or closing } */
 var g_fnbody:int;     /* the next statement is a function's own body (dofunc) */
 var lptr:int;
@@ -2336,7 +2337,7 @@ func statemen()
   else
   {
     g_stmtexp=1;   /* expressi warns if the whole statement is a comparison */
-    expressi();
+    expdiscard();
     ns();
     lastst=stexp;
   }
@@ -2943,7 +2944,7 @@ func dofor()
   thecont=getlabel();
   addwhile(thesym,thesp,thecont,thelab);
   needbrac(tlarg/*"("*/);
-  expressi();/* i=0 */
+  expdiscard();/* i=0 */
   ns();
   /*printlab(theloop);
   col();
@@ -2964,7 +2965,7 @@ func dofor()
   clab(thecont);
   blanks();
   if(!streq(line+lptr,trarg)/*ch()!=')'*/)
-  expressi();/* i++ */
+  expdiscard();/* i++ */
   var scodegen:cg2;
   cg_init(&cg2);
   ccg=&cg2;
@@ -4029,8 +4030,10 @@ func ct_COMMA(node:*enode,lval:*elval)
   var elval:lval1;
   for(cnode=node;cnode;cnode=cnode->r)
   {
+    if(cnode->l)cnode->l->novalue=1;
     k=treetocode(cnode->l,&lval1);
     if(k)rvalue(&lval1);
+    fpdiscard(cnode->l,lval1.typ);
     if(cnode->r&&cnode->r->op!=OP_COMMA)
     return treetocode(cnode->r,lval);
   }
@@ -4118,9 +4121,34 @@ func ct_ASSIGN(node:*enode,lval:*elval)
   lval->sort=L_ONREG;
   lval->idx=0;
   lval->offset=0;
-  lval->typ=lval1.typ;   /* assigned value is now the target type */
+  lval->typ=fpdecay(lval1.typ);   /* the assigned value, as held (a float as a double) */
+  if(fpkeep(node,lval1.typ))fdup();
   store(&lval1);
   return 0;
+}
+/* the type of a loaded or assigned value: a float is held as a double */
+func fpdecay(t:int)
+{
+  if(t==T_FLOAT)return T_DOUBLE;
+  return t;
+}
+/* i386 x87: must an assignment-like node (=, ++, --) keep a copy of its
+   FP result past the popping store? Only when its value is used; a discarded
+   one (novalue) leaves nothing behind. Other targets keep FP values in a
+   register that the store does not consume. */
+func fpkeep(node:*enode,t:int)
+{
+  return (target.arch==ARCH_I386)&&isfp(t)&&!node->novalue;
+}
+/* i386 x87: a discarded FP value is still on the x87 stack, which holds only
+   eight -- pop it, unless node is an assignment-like node that kept nothing
+   (fpkeep). */
+func fpdiscard(node:*enode,t:int)
+{
+  if((target.arch!=ARCH_I386)||!isfp(t)||!node)return;
+  if((node->op==OP_ASSIGN)||(node->op==OP_1PP)
+  ||(node->op==OP_1MM)||(node->op==OP_2PP)||(node->op==OP_2MM))return;
+  fdrop();
 }
 func ct_LOR(node:*enode,lval:*elval)
 {
@@ -4594,10 +4622,11 @@ func chkconst(lval:*elval)
 }
 func ct_1PP(node:*enode,lval:*elval)
 {
-  var int:k,sz;
+  var int:k,sz,t;
   k=treetocode(node->r,lval);
   if(!k){needlval();return 0;}
   chkconst(lval);
+  t=lval->typ;   /* rvalue decays a float to double; store it as a float */
   if(constarr(node->r))error("modifying a const array element");
   if(lval->sort==L_POI)
   {
@@ -4610,8 +4639,10 @@ func ct_1PP(node:*enode,lval:*elval)
   sz=gettsize(typtab[lval->typ].type);
   else sz=1;
   if(isfp(lval->typ))finc();else if(ll32(lval->typ))increg64(sz);else increg(sz);
-  if(isfp(lval->typ)&&(target.arch==ARCH_I386))fdup();
+  if(fpkeep(node,lval->typ))fdup();
+  lval->typ=t;
   store(lval);
+  lval->typ=fpdecay(t);
   lval->sort=L_ONREG;
   lval->idx=0;
   lval->offset=0;
@@ -4619,10 +4650,11 @@ func ct_1PP(node:*enode,lval:*elval)
 }
 func ct_1MM(node:*enode,lval:*elval)
 {
-  var int:k,sz;
+  var int:k,sz,t;
   k=treetocode(node->r,lval);
   if(!k){needlval();return 0;}
   chkconst(lval);
+  t=lval->typ;   /* rvalue decays a float to double; store it as a float */
   if(constarr(node->r))error("modifying a const array element");
   if(lval->sort==L_POI)
   {
@@ -4635,8 +4667,10 @@ func ct_1MM(node:*enode,lval:*elval)
   sz=gettsize(typtab[lval->typ].type);
   else sz=1;
   if(isfp(lval->typ))fdec();else if(ll32(lval->typ))decreg64(sz);else decreg(sz);
-  if(isfp(lval->typ)&&(target.arch==ARCH_I386))fdup();
+  if(fpkeep(node,lval->typ))fdup();
+  lval->typ=t;
   store(lval);
+  lval->typ=fpdecay(t);
   lval->sort=L_ONREG;
   lval->idx=0;
   lval->offset=0;
@@ -4644,10 +4678,11 @@ func ct_1MM(node:*enode,lval:*elval)
 }
 func ct_2PP(node:*enode,lval:*elval)
 {
-  var int:k,sz;
+  var int:k,sz,t;
   k=treetocode(node->r,lval);
   if(!k){needlval();return 0;}
   chkconst(lval);
+  t=lval->typ;   /* rvalue decays a float to double; store it as a float */
   if(constarr(node->r))error("modifying a const array element");
   if(lval->sort==L_POI)
   {
@@ -4660,9 +4695,12 @@ func ct_2PP(node:*enode,lval:*elval)
   sz=gettsize(typtab[lval->typ].type);
   else sz=1;
   if(isfp(lval->typ))finc();else if(ll32(lval->typ))increg64(sz);else increg(sz);
-  if(isfp(lval->typ)&&(target.arch==ARCH_I386))fdup();
+  if(fpkeep(node,lval->typ))fdup();
+  lval->typ=t;
   store(lval);
-  if(isfp(lval->typ))fdec();else if(ll32(lval->typ))decreg64(sz);else decreg(sz);
+  lval->typ=fpdecay(t);
+  if(isfp(lval->typ)){if((target.arch!=ARCH_I386)||fpkeep(node,lval->typ))fdec();}
+  else if(ll32(lval->typ))decreg64(sz);else decreg(sz);
   lval->sort=L_ONREG;
   lval->idx=0;
   lval->offset=0;
@@ -4670,10 +4708,11 @@ func ct_2PP(node:*enode,lval:*elval)
 }
 func ct_2MM(node:*enode,lval:*elval)
 {
-  var int:k,sz;
+  var int:k,sz,t;
   k=treetocode(node->r,lval);
   if(!k){needlval();return 0;}
   chkconst(lval);
+  t=lval->typ;   /* rvalue decays a float to double; store it as a float */
   if(constarr(node->r))error("modifying a const array element");
   if(lval->sort==L_POI)
   {
@@ -4686,9 +4725,12 @@ func ct_2MM(node:*enode,lval:*elval)
   sz=gettsize(typtab[lval->typ].type);
   else sz=1;
   if(isfp(lval->typ))fdec();else if(ll32(lval->typ))decreg64(sz);else decreg(sz);
-  if(isfp(lval->typ)&&(target.arch==ARCH_I386))fdup();
+  if(fpkeep(node,lval->typ))fdup();
+  lval->typ=t;
   store(lval);
-  if(isfp(lval->typ))finc();else if(ll32(lval->typ))increg64(sz);else increg(sz);
+  lval->typ=fpdecay(t);
+  if(isfp(lval->typ)){if((target.arch!=ARCH_I386)||fpkeep(node,lval->typ))finc();}
+  else if(ll32(lval->typ))increg64(sz);else increg(sz);
   lval->sort=L_ONREG;
   lval->idx=0;
   lval->offset=0;
@@ -5603,14 +5645,25 @@ func foldtree(node:*enode)
     node->leaf.idx=0;
   }
 }
+/* an expression evaluated only for its effects -- an expression statement or
+   a for clause: its value is dropped (fpdiscard), and an assignment-like
+   node at its top need not keep one (fpkeep) */
+func expdiscard()
+{
+  g_discard=1;
+  expressi();
+}
 func expressi()
 {
   var *enode:node;
   var elval:lval;
-  var int:rt;
+  var int:rt;var int:disc;
+  disc=g_discard;
+  g_discard=0;
   node=bexptree();
   foldtree(node);   /* M5: fold constant integer subexpressions */
   prestemps(node);  /* struct temps allocated before any operand is pushed */
+  if(disc&&node)node->novalue=1;
   if(g_stmtexp)
   {
     /* a whole statement that is just a comparison discards its result --
@@ -5624,6 +5677,7 @@ func expressi()
   rt=T_INT;
   if(treetocode(node,&lval))rvalue(&lval);
   rt=lval.typ;   /* treetocode fills lval.typ whether or not rvalue was needed */
+  if(disc)fpdiscard(node,rt);
   delenode(node);
   return rt;   /* result type, so callers can convert (M4) */
 }
