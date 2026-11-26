@@ -16,6 +16,8 @@
 
 # Transpiler build artifacts (generated C + binaries)
 transpiler/build/
+# The IDE, as its own project (ide/ed.prj) builds it
+/ide/ed
 __pycache__/
 *.pyc
 

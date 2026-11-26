@@ -2,7 +2,9 @@
    compositor -- the platform + screen/input slice of the UPLNC IDE plan
    (IDE.md section 7 step 1). All terminal state changes go through
    ide/tshim.c; tuidone() restores the terminal exactly as tuiinit found it
-   (alternate screen + cursor + termios), which the PTY tests pin.
+   (alternate screen + cursor + termios), which the PTY tests pin. tuiinit
+   again afterwards takes the terminal back -- the IDE's Run hands it to a
+   program in between -- and the next flush repaints everything.
 
    The screen is a grid of cells, one int each: a printable byte in bits 0-7
    and the attribute above it (fg 0-15, bg 0-7, A_ACS selects the DEC
@@ -123,10 +125,14 @@ func sizequery()
 func tuiinit()
 {
   if(tui_up)return 0;
-  tui_obcap=4096;tui_obn=0;
+  tui_obn=0;
   tui_cx=0-1;tui_cy=0;tui_cshow=0;   /* caret hidden until tuicurs asks */
-  tui_ob=malloc(tui_obcap);
-  if(!tui_ob){fprintf(stderr,"tui: out of memory\n");exit(2);}
+  if(!tui_ob)                        /* kept across tuidone/tuiinit */
+  {
+    tui_obcap=4096;
+    tui_ob=malloc(tui_obcap);
+    if(!tui_ob){fprintf(stderr,"tui: out of memory\n");exit(2);}
+  }
   tsh_sigwinch();
   if(tsh_rawon()<0)
   {
@@ -154,6 +160,28 @@ func tuidone()
   tsh_rawoff();
   tui_up=0;
   return 0;
+}
+
+/* Show the screen tuiinit found -- the one a program the IDE ran wrote
+   to -- until a key arrives, and return that key (K_EOF at end of input);
+   the next flush then repaints everything, at the size the terminal has
+   by then. Turbo's Alt-F5 user screen. */
+func tuiuser()
+{
+  var k:int;
+  obesc("[0m");
+  obesc("[?1049l");
+  obflush();
+  k=K_NONE;
+  while((k==K_NONE)||(k==K_RESIZE))k=tuikey(0-1);
+  obesc("[?1049h");
+  obesc("[?25l");
+  tui_cshow=0;
+  sizequery();
+  gridalloc();
+  obesc("[2J");
+  obflush();
+  return k;
 }
 
 /* after K_RESIZE: re-query the size and force a full repaint */
@@ -418,6 +446,8 @@ func tuikey(ms:int)
     if(c=='F')return K_END;
     return K_NONE;
   }
+  /* Alt-Backspace: ESC DEL, or ESC BS where Backspace sends ^H */
+  if((c==127)||(c==K_BS))return K_ALT+K_BS;
   /* ESC followed by a printable byte is Alt+that key; a lone ESC timed out
      above. Upper and lower case fold together, so Alt-X and Alt-x are one. */
   if((c>=32)&&(c<127))

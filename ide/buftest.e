@@ -1,7 +1,8 @@
 /* buftest.e: the text buffer's cross-target proof. Exercises every editing
    primitive plus a save/load round trip through a real file, and checks the
-   resulting text byte for byte. Pure logic and file I/O -- no terminal -- so
-   it runs on every backend.
+   resulting text byte for byte; then undo and redo of every primitive, by
+   group, with the cursors they report and the saved state they track. Pure
+   logic and file I/O -- no terminal -- so it runs on every backend.
 
    Usage: buftest <scratch-file>   (exit 42 on success, else the failing step)
    Build: perl src/langdrv.pl -march=ARCH -o buftest ide/buftest.e ide/buf.e */
@@ -30,6 +31,41 @@ func lineis(i:int,want:*char)
   if(!streq0(p,want))return 0;
   if(b.llen(i)!=strlen1(want))return 0;
   return 1;
+}
+
+/* the whole buffer, its lines joined by newlines, equals want? */
+func textis(want:*char)
+{
+  var i,j,k:int;
+  var p:*char;
+  k=0;
+  for(i=0;i<b.n;i++)
+  {
+    if(i>0)
+    {
+      if(want[k]!=10)return 0;
+      k++;
+    }
+    p=b.line(i);
+    for(j=0;j<b.llen(i);j++)
+    {
+      if(want[k]!=p[j])return 0;
+      k++;
+    }
+  }
+  return want[k]==0;
+}
+
+/* undo (d=0) or redo (d=1) one group: it must land on text with the cursor
+   at y,x */
+func step(d:int,text:*char,y:int,x:int)
+{
+  var r:int;
+  if(d)r=b.redo();
+  else r=b.undo();
+  if(!r)return 0;
+  if(!textis(text))return 0;
+  return (b.uy==y)&&(b.ux==x);
 }
 
 func strlen1(s:*char)
@@ -167,6 +203,80 @@ func main(argc:int,argv:**char)
   if(b.load("/"))return 36;
   if(!lineis(0,"alpha!"))return 37;
   if((b.n!=4)||(b.dirty!=1))return 38;
+  /* a load starts a fresh history: there is nothing to undo after it */
+  if(!b.load(path))return 43;
+  if(b.undo()||b.redo())return 44;
+
+  /* Undo and redo, one group per editor command. The first group opens
+     without a mark, so it records its first change's own position. */
+  b.done();
+  b.init();
+  typein(0,0,"hello");
+  b.mark(0,5);                   /* Enter at the end, then a new line */
+  b.split(0,5);
+  typein(1,0,"world");
+  b.mark(1,5);                   /* two Backspaces */
+  b.delch(1,4);
+  b.delch(1,3);
+  b.mark(1,0);                   /* Backspace at column 0 joins */
+  b.join(0);
+  b.mark(0,0);                   /* a line above, then both lines deleted:
+                                    the last one is emptied in place */
+  b.insline(0);
+  typein(0,0,"top");
+  b.delline(1);
+  b.delline(0);
+  if(!textis("")||(b.n!=1)||!b.dirty)return 45;
+  if(!step(0,"hellowor",0,0))return 46;
+  if(!step(0,"hello\nwor",1,0))return 47;
+  if(!step(0,"hello\nworld",1,5))return 48;
+  if(!step(0,"hello",0,5))return 49;
+  if(!step(0,"",0,0))return 50;
+  if(b.undo())return 51;
+  if(b.dirty)return 52;          /* back to the state it started from */
+  /* redo replays forwards, leaving the cursor after each group's last change */
+  if(!step(1,"hello",0,5))return 53;
+  if(!step(1,"hello\nworld",1,5))return 54;
+  if(!step(1,"hello\nwor",1,3))return 55;
+  if(!step(1,"hellowor",0,5))return 56;
+  if(!step(1,"",0,0))return 57;
+  if(b.redo())return 58;
+  if(!b.dirty)return 59;
+  /* a new change after undo discards what could have been redone */
+  if(!step(0,"hellowor",0,0))return 60;
+  if(!step(0,"hello\nwor",1,0))return 61;
+  b.mark(1,3);
+  b.insch(1,3,'!');
+  if(b.redo())return 62;
+  if(!step(0,"hello\nwor",1,3))return 63;
+  if(!step(1,"hello\nwor!",1,4))return 64;
+
+  /* the saved state: undoing back to it makes the buffer clean again */
+  if(!b.save(path))return 65;
+  b.mark(1,4);
+  b.insch(1,4,'?');
+  if(!b.dirty)return 66;
+  if(!step(0,"hello\nwor!",1,4)||b.dirty)return 67;
+  if(!step(1,"hello\nwor!?",1,5)||!b.dirty)return 68;
+  if(!step(0,"hello\nwor!",1,4)||b.dirty)return 69;
+  /* ... and is lost once a change replaces the history that reached it,
+     even when the log is back to the same length */
+  if(!step(0,"hello\nwor",1,3)||!b.dirty)return 70;
+  b.mark(1,3);
+  b.insch(1,3,'#');
+  if(!step(0,"hello\nwor",1,3)||!b.dirty)return 71;
+  if(!step(1,"hello\nwor#",1,4)||!b.dirty)return 72;
+
+  /* a group ending in a split or a new line: redo leaves the cursor at the
+     start of the line it made */
+  b.mark(1,4);
+  b.split(1,2);
+  if(!step(0,"hello\nwor#",1,4))return 73;
+  if(!step(1,"hello\nwo\nr#",2,0))return 74;
+  b.mark(0,0);
+  b.insline(3);
+  if(!step(0,"hello\nwo\nr#",0,0))return 75;
+  if(!step(1,"hello\nwo\nr#\n",3,0))return 76;
 
   b.done();
   return 42;

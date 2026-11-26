@@ -23,12 +23,17 @@ static struct termios tsh_saved;
 static intptr_t tsh_have_saved = 0;
 static volatile sig_atomic_t tsh_winch = 0;
 
-/* enter raw mode on stdin, saving the exact prior state; 0 ok, -1 error */
+/* enter raw mode on stdin, saving the exact prior state; 0 ok, -1 error.
+ * Only the first call saves: entering raw mode again after a program the
+ * IDE ran (Run) starts from that same state, so a program that leaves the
+ * terminal in an odd mode cannot change what tsh_rawoff finally restores. */
 intptr_t tsh_rawon(void)
 {
     struct termios t;
-    if (tcgetattr(0, &tsh_saved) != 0) return -1;
-    tsh_have_saved = 1;
+    if (!tsh_have_saved) {
+        if (tcgetattr(0, &tsh_saved) != 0) return -1;
+        tsh_have_saved = 1;
+    }
     t = tsh_saved;
     cfmakeraw(&t);
     t.c_cc[VMIN] = 1;
@@ -194,6 +199,50 @@ intptr_t tsh_run(char *const *argv, char *out, intptr_t cap, intptr_t *outn)
     if (WIFEXITED(st)) return WEXITSTATUS(st);
     if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
     return -1;
+}
+
+/* Run argv (argv[0] found on PATH) on the IDE's own terminal and wait for it:
+ * the Run command, once the caller has given the terminal back (tuidone).
+ * Meanwhile the IDE ignores SIGINT and SIGQUIT, as system() does, so Ctrl-C
+ * and Ctrl-\ end the program and not the IDE; the child gets back the
+ * dispositions the IDE had. Returns the exit status (0-255), 256+signal if
+ * a signal ended it, or -1 if it could not be started; a program that
+ * cannot be executed says so on stderr and exits 127. */
+intptr_t tsh_spawn(char *const *argv)
+{
+    struct sigaction ign, oldint, oldquit;
+    pid_t pid;
+    int st;
+    intptr_t r = -1;
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    ign.sa_flags = 0;
+    sigaction(SIGINT, &ign, &oldint);
+    sigaction(SIGQUIT, &ign, &oldquit);
+    pid = fork();
+    if (pid == 0) {
+        static const char msg[] = "cannot run ";
+        sigaction(SIGINT, &oldint, 0);
+        sigaction(SIGQUIT, &oldquit, 0);
+        execvp(argv[0], argv);
+        (void)!write(2, msg, sizeof msg - 1);
+        (void)!write(2, argv[0], strlen(argv[0]));
+        (void)!write(2, "\n", 1);
+        _exit(127);
+    }
+    if (pid > 0) {
+        for (;;) {
+            if (waitpid(pid, &st, 0) >= 0) {
+                if (WIFEXITED(st)) r = WEXITSTATUS(st);
+                else if (WIFSIGNALED(st)) r = 256 + WTERMSIG(st);
+                break;
+            }
+            if (errno != EINTR) break;   /* a resize interrupts the wait */
+        }
+    }
+    sigaction(SIGINT, &oldint, 0);
+    sigaction(SIGQUIT, &oldquit, 0);
+    return r;
 }
 
 /* the kernel's machine name (uname -m) into buf, NUL-terminated and

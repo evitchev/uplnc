@@ -1,8 +1,16 @@
 /* build.e: the IDE's F9 build and its messages (IDE.md phase 1). bdrun runs
-   the driver -- perl langdrv.pl -march=<host> -o <exe> <file> -- through
+   the driver -- perl langdrv.pl -march=<host> -o <exe> <units> -- through
    the shim's tsh_run, which keeps the child off the raw-mode terminal and
    captures its stdout and stderr together. The editor saves first; bdrun
    never touches the buffer.
+
+   The units are the open file alone, or a project's. A project file (Turbo
+   C's .PRJ, as plain text) names one unit per line -- .e sources, and .c,
+   .s or .o files the driver also takes -- relative to the project file's
+   own directory unless absolute; blank lines and lines starting with # are
+   skipped. Its program is the project file without .prj, so app.prj
+   builds app beside it. The project is read again at every build, so
+   editing it in the IDE takes effect at once.
 
    The captured text is kept as one message per line. A line that starts
    with "<file>:<line>:" -- the shape langc, lpp1, gcc and as all print -- is
@@ -10,10 +18,18 @@
    source line and its caret, the driver's summary, linker output) is shown
    as context but skipped by next/previous error. A location is shown from
    its file's base name on (bmshow), so the message itself stays on screen,
-   and when langc's caret line follows it, its column is kept too. */
+   and when langc's caret line follows it, its column is kept too.
+
+   Run: bdspawn starts the program the last build made on the IDE's own
+   terminal through the shim's tsh_spawn, once the editor has handed the
+   terminal over. */
 
 func tsh_run(argv:**char,out:*char,cap:int,outn:*int);
 func tsh_machine(buf:*char,cap:int);
+func tsh_spawn(argv:**char);
+func fopen(n:*char,m:*char):*int;
+func fgetc(fp:*int);
+func fclose(fp:*int);
 func malloc(n:int);
 func realloc(p:int,n:int);
 func free(p:int);
@@ -24,6 +40,8 @@ func bfexists(nm:*char);
 var extern stderr:*int;
 
 #define BM_CAP 65536     /* captured build output kept per build, in bytes */
+#define BD_LINE 1024     /* the longest project line kept, with its NUL */
+#define BD_ARGS 128      /* the most arguments Run passes a program */
 
 var bmbuf:*char;         /* the captured output, its lines NUL-terminated */
 var bmtext:**char;       /* each message line */
@@ -34,6 +52,9 @@ var bmbase:*int;         /* where the file's base name starts in the text */
 var bmn,bma:int;
 var bmsel:int;           /* the selected message, or -1 */
 var bmexe:*char;         /* the last build's output program */
+var bdprj:*char;         /* the project file (heap), or 0 for none */
+var bdunit:**char;       /* the units bdunits read last (heap) */
+var bdnu,bdua:int;
 
 func bmoom()
 {
@@ -244,27 +265,124 @@ func bdeq(a:*char,b:*char)
   return *a==*b;
 }
 
-/* the program a build of `file` makes: file without its .e, or file.out */
-func bdexe(file:*char):*char
+/* does s end with ext (".e", ".prj"), with something before it? */
+func bdext(s:*char,ext:*char)
+{
+  var n,m:int;
+  n=bmlen(s);
+  m=bmlen(ext);
+  return (n>m)&&bdeq(s+n-m,ext);
+}
+
+/* the program a build of `file` makes: file without its extension ext, or
+   file.out when it has another one */
+func bdexe(file:*char,ext:*char):*char
 {
   var n:int;
   var p:*char;
   n=bmlen(file);
-  if((n>2)&&(file[n-2]=='.')&&(file[n-1]=='e'))return bmdup(file,n-2);
+  if(bdext(file,ext))return bmdup(file,n-bmlen(ext));
   p=malloc(n+5);
   if(!p)bmoom();
   bdcat(p,bdcat(p,0,file),".out");
   return p;
 }
 
-/* Build `file`: the driver's exit status (0 is success), with its output
-   as the messages; -1 if no driver was found or none could be started. */
+/* forget the units bdunits read */
+func bdfreeunits()
+{
+  var i:int;
+  for(i=0;i<bdnu;i++)free(bdunit[i]);
+  bdnu=0;
+  return 0;
+}
+
+/* add unit s (n bytes) of a project in directory dir (dn bytes, 0 when the
+   project file has no directory part, or when s is absolute) */
+func bdaddunit(dir:*char,dn:int,s:*char,n:int)
+{
+  var p:*char;
+  var i:int;
+  if(bdnu>=bdua)
+  {
+    bdua=bdua*2;
+    if(bdua<16)bdua=16;
+    bdunit=realloc(bdunit,bdua*sizeof(*char));
+    if(!bdunit)bmoom();
+  }
+  if(s[0]=='/')dn=0;
+  p=malloc(dn+n+1);
+  if(!p)bmoom();
+  for(i=0;i<dn;i++)p[i]=dir[i];
+  for(i=0;i<n;i++)p[dn+i]=s[i];
+  p[dn+n]=0;
+  bdunit[bdnu++]=p;
+  return 0;
+}
+
+/* Read project file prj into bdunit[0..n-1]: n, or -1 if it cannot be
+   read. Each line is trimmed of surrounding blanks; a blank line or one
+   starting with # names nothing. */
+func bdunits(prj:*char)
+{
+  var [BD_LINE]char:t;
+  var fp:*int;
+  var c,n,dn,i,st,en:int;
+  bdfreeunits();
+  fp=fopen(prj,"r");
+  if(!fp)return 0-1;
+  dn=0;
+  for(i=0;prj[i];i++)if(prj[i]=='/')dn=i+1;
+  n=0;
+  c=0;
+  while(c>=0)
+  {
+    c=fgetc(fp);
+    if((c>=0)&&(c!=10))
+    {
+      if(n<BD_LINE-1)t[n++]=c;
+      continue;
+    }
+    st=0;
+    en=n;
+    while((st<en)&&((t[st]==' ')||(t[st]==9)))st++;
+    while((en>st)&&((t[en-1]==' ')||(t[en-1]==9)||(t[en-1]==13)))en--;
+    if((en>st)&&(t[st]!='#'))bdaddunit(prj,dn,t+st,en-st);
+    n=0;
+  }
+  fclose(fp);
+  return bdnu;
+}
+
+/* the project's file name without its directory, or "" without one */
+func bdprjname():*char
+{
+  var i,b:int;
+  if(!bdprj)return "";
+  b=0;
+  for(i=0;bdprj[i];i++)if(bdprj[i]=='/')b=i+1;
+  return bdprj+b;
+}
+
+/* a build failed before the driver ran: msg and s as its one message */
+func bdfail(msg:*char,s:*char)
+{
+  bdcat(bmbuf,bdcat(bmbuf,0,msg),s);
+  bmadd(bmbuf);
+  return 0-1;
+}
+
+/* Build the project, or `file` when there is none (a file that is itself a
+   project file builds as one): the driver's exit status (0 is success),
+   with its output as the messages; -1 if the build could not be started --
+   no driver, an unreadable or empty project -- with the reason as the one
+   message. */
 func bdrun(file:*char)
 {
-  var [12]*char:av;
+  var av:**char;
   var [80]char:march;
-  var drv:*char;
-  var n,rc:int;
+  var drv,prj:*char;
+  var n,rc,i:int;
   bmclear();
   if(!bmbuf)
   {
@@ -274,22 +392,37 @@ func bdrun(file:*char)
   drv=bddriver();
   if(!drv)
   {
-    bdcat(bmbuf,0,"cannot find langdrv.pl: set UPLNC_DRIVER to its path");
-    bmadd(bmbuf);
-    return 0-1;
+    return bdfail("cannot find langdrv.pl: set UPLNC_DRIVER to its path","");
   }
+  prj=bdprj;
+  if((!prj)&&bdext(file,".prj"))prj=file;
   if(bmexe)free(bmexe);
-  bmexe=bdexe(file);
+  if(prj)
+  {
+    n=bdunits(prj);
+    if(n<0)return bdfail("cannot read project file ",prj);
+    if(!n)return bdfail("no units listed in project file ",prj);
+    bmexe=bdexe(prj,".prj");
+  }
+  else
+  {
+    bdfreeunits();
+    bdaddunit("",0,file,bmlen(file));
+    bmexe=bdexe(file,".e");
+  }
   bdcat(march,bdcat(march,0,"-march="),bdmarch());
+  av=malloc((bdnu+6)*sizeof(*char));
+  if(!av)bmoom();
   av[0]="perl";
   av[1]=drv;
   av[2]=march;
   av[3]="-o";
   av[4]=bmexe;
-  av[5]=file;
-  av[6]=0;
+  for(i=0;i<bdnu;i++)av[5+i]=bdunit[i];
+  av[5+bdnu]=0;
   n=0;
   rc=tsh_run(av,bmbuf,BM_CAP,&n);
+  free(av);
   bmsplit(n);
   return rc;
 }
@@ -315,4 +448,45 @@ func bmnext(d:int)
     i=i+d;
   }
   return 0-1;
+}
+
+/* Run the program the last build made, with args split at blanks (a
+   "double-quoted" stretch keeps its blanks; arguments past BD_ARGS are
+   dropped), on the terminal the caller has handed over: its exit status,
+   256+signal if a signal ended it, or -1 if it could not be started. */
+func bdspawn(args:*char)
+{
+  var [BD_ARGS+2]*char:av;
+  var p:*char;
+  var i,n,ac,q,rc:int;
+  if(!bmexe)return 0-1;
+  p=malloc(bmlen(bmexe)+2*bmlen(args)+8);
+  if(!p)bmoom();
+  /* a program name without a directory would be looked for on PATH */
+  n=0;
+  q=0;
+  for(i=0;bmexe[i];i++)if(bmexe[i]=='/')q=1;
+  if(!q)n=bdcat(p,0,"./");
+  n=bdcat(p,n,bmexe)+1;
+  av[0]=p;
+  ac=1;
+  i=0;
+  while(ac<=BD_ARGS)
+  {
+    while((args[i]==' ')||(args[i]==9))i++;
+    if(!args[i])break;
+    av[ac++]=p+n;
+    q=0;
+    while(args[i]&&(q||((args[i]!=' ')&&(args[i]!=9))))
+    {
+      if(args[i]=='"')q=!q;
+      else p[n++]=args[i];
+      i++;
+    }
+    p[n++]=0;
+  }
+  av[ac]=0;
+  rc=tsh_spawn(av);
+  free(p);
+  return rc;
 }

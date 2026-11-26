@@ -4,10 +4,25 @@
    least one line, so a cursor always has somewhere to sit.
 
    Line and column numbers are 0-based everywhere; the editor adds 1 only when
-   it displays them. */
+   it displays them.
+
+   Undo: every primitive that changes the text also appends a record of it to
+   the buffer's undo log, so no editing command can bypass undo. The editor
+   only says where one undo step ends and the next begins (mark); undo and
+   redo then replay a whole group of records backwards or forwards. */
 
 #define BF_CHUNK 64      /* initial per-line capacity, doubled as needed */
 #define BF_ROWS0 64      /* initial line-slot count, doubled as needed */
+
+/* undo record kinds */
+#define BU_MARK 1        /* a group starts: y,x = the cursor to restore */
+#define BU_INSCH 2       /* insch(y,x,ch) */
+#define BU_DELCH 3       /* delch(y,x), which removed ch */
+#define BU_SPLIT 4       /* split(y,x) */
+#define BU_JOIN 5        /* join(y), when line y was x bytes long */
+#define BU_INSLINE 6     /* insline(y) */
+#define BU_DELLINE 7     /* delline(y), which removed text (ch=1: it was the
+                            only line, so it was emptied in place) */
 
 func bfexists(nm:*char); /* path exists, including a dangling symlink */
 
@@ -17,11 +32,31 @@ struct sbline{
   int cap;               /* bytes allocated for s */
 };
 
+struct sbundo{
+  int op;                /* BU_* */
+  int y;
+  int x;
+  int ch;
+  *char text;            /* BU_DELLINE's removed text (heap), else 0 */
+};
+
 struct sbuf{
   *sbline l;             /* the lines */
   int n;                 /* how many (always >= 1) */
   int a;                 /* line slots allocated */
   int dirty;             /* modified since the last load or save */
+  *sbundo u;             /* the undo log, oldest record first */
+  int un;                /* records in effect; un..utop-1 can be redone */
+  int utop;
+  int ua;                /* record slots allocated */
+  int usave;             /* un at the last load or save, -1 once unreachable */
+  int uoff;              /* >0 while changes are not logged */
+  int uopen;             /* the next change may join the newest group */
+  int uhave;             /* mark gave the cursor for the next group: */
+  int umy;
+  int umx;
+  int uy;                /* where undo or redo left the cursor */
+  int ux;
   func init;
   func done;
   func grow;             /* ensure n line slots */
@@ -36,4 +71,10 @@ struct sbuf{
   func join;             /* append line i+1 to line i and remove it */
   func load;             /* transactional file load; 0 leaves this unchanged */
   func save;             /* atomic file replacement; 0 leaves file/dirty set */
+  func mark;             /* the next change starts an undo group at cursor y,x */
+  func undo;             /* revert the newest group: 1, cursor in uy,ux; or 0 */
+  func redo;             /* reapply the last undone group: 1 (uy,ux); or 0 */
+  func ulog;             /* append a record of one change (the primitives) */
+  func upush;            /* append one record, growing the log */
+  func utrim;            /* drop the records from index i on */
 };

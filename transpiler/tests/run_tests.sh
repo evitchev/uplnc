@@ -2826,9 +2826,10 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
     python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_menu.bin" \
         > "$TMPD/uplnc_ed_menu2.screen"
     if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_menu.err" \
-            && grep -q '^ *File  Edit  Search  Compile' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q '^ *File  Edit  Search  Run  Compile  Project$' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Open\.\.\. *F3 x' "$TMPD/uplnc_ed_menu1.screen" \
             && grep -q 'x Exit *Alt-X x' "$TMPD/uplnc_ed_menu1.screen" \
+            && grep -q 'x Undo *Alt-BkSp x' "$TMPD/uplnc_ed_menu2.screen" \
             && grep -q 'x Copy *Ctrl-Ins x' "$TMPD/uplnc_ed_menu2.screen" \
             && ! grep -q 'Open\.\.\.' "$TMPD/uplnc_ed_menu2.screen"; then
         ok "editor menus: Alt-F and F10 open them, Right moves along the bar"
@@ -2953,6 +2954,195 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
         ok "editor F9 builds a clean program that runs"
     else
         bad "editor clean build"
+    fi
+    # Undo (Alt-Backspace = ESC DEL) takes back a run of typing at a time:
+    # "cd" first, then "ab" with the Enter that ended it, each time putting
+    # the cursor back where the run began; Edit/Redo replays "ab" and Enter.
+    printf 'one\n' > "$TMPD/uplnc_ed_undo.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_undo.txt" \
+        w:6162 w:0d w:6364 w:1b7f w:1b7f s w:1b65 w:72 s w:1b4f51 p w:1b78 \
+        > "$TMPD/uplnc_ed_undo.bin" 2> "$TMPD/uplnc_ed_undo.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_undo.bin" \
+        > "$TMPD/uplnc_ed_undo1.screen"
+    python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_undo.bin" \
+        > "$TMPD/uplnc_ed_undo2.screen"
+    printf 'ab\none\n' > "$TMPD/uplnc_ed_undo.want"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_undo.err" \
+            && [ "$(sed -n 2,3p "$TMPD/uplnc_ed_undo1.screen")" = one ] \
+            && grep -q '^ L1 C1 ' "$TMPD/uplnc_ed_undo1.screen" \
+            && [ "$(sed -n 2,3p "$TMPD/uplnc_ed_undo2.screen")" = "$(printf 'ab\none')" ] \
+            && grep -q '^ L2 C1 ' "$TMPD/uplnc_ed_undo2.screen" \
+            && cmp -s "$TMPD/uplnc_ed_undo.txt" "$TMPD/uplnc_ed_undo.want"; then
+        ok "editor undoes a run of typing at a time; Edit/Redo replays it"
+    else
+        bad "editor undo/redo"
+    fi
+    # With nothing to undo it says so. Typing over a selection is one step,
+    # and undoing back to the loaded text leaves the buffer clean: Alt-X
+    # then quits at once, and the file is never written. (The second undo
+    # is ESC BS: Alt-Backspace where Backspace sends ^H.)
+    printf 'alpha\n' > "$TMPD/uplnc_ed_undo2.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_undo2.txt" \
+        w:1b7f s w:1b5b313b3246 w:5a w:1b08 w:1b78 \
+        > "$TMPD/uplnc_ed_undo2.bin" 2> "$TMPD/uplnc_ed_undo2.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_undo2.bin" \
+        > "$TMPD/uplnc_ed_undo3.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_undo2.err" \
+            && grep -q 'Nothing to undo' "$TMPD/uplnc_ed_undo3.screen" \
+            && [ "$(cat "$TMPD/uplnc_ed_undo2.txt")" = alpha ]; then
+        ok "editor undo back to the loaded text leaves the buffer clean"
+    else
+        bad "editor undo to a clean buffer"
+    fi
+    # Search/Replace asks for both texts, then stops at each match with the
+    # question on the status line: Y replaces, N skips, A does the rest.
+    printf 'foo bar foo\nfoo\nx foo\n' > "$TMPD/uplnc_ed_repl.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_repl.txt" \
+        w:1b73 w:72 w:$(edhex foo) w:0d w:$(edhex qux) w:0d s w:79 w:6e w:61 s \
+        w:1b4f51 p w:1b78 > "$TMPD/uplnc_ed_repl.bin" 2> "$TMPD/uplnc_ed_repl.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_repl.bin" \
+        > "$TMPD/uplnc_ed_repl1.screen"
+    python3 tests/screen.py 24x80 --snap 2 < "$TMPD/uplnc_ed_repl.bin" \
+        > "$TMPD/uplnc_ed_repl2.screen"
+    printf 'qux bar foo\nqux\nx qux\n' > "$TMPD/uplnc_ed_repl.want"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_repl.err" \
+            && grep -q '^ L1 C4  *Replace this occurrence?' "$TMPD/uplnc_ed_repl1.screen" \
+            && grep -q '^ L3 C6  *3 occurrences replaced' "$TMPD/uplnc_ed_repl2.screen" \
+            && cmp -s "$TMPD/uplnc_ed_repl.txt" "$TMPD/uplnc_ed_repl.want"; then
+        ok "editor replaces with Y/N/All answers at each match"
+    else
+        bad "editor Replace"
+    fi
+    # A whole Replace is one undo step, and Ctrl-L repeats the Replace, not a
+    # Find: after undoing "All", Y then Esc replaces just the first again.
+    printf 'a1 a2\n' > "$TMPD/uplnc_ed_repl2.txt"
+    python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 "a:$TMPD/uplnc_ed_repl2.txt" \
+        w:1b73 w:72 w:61 w:0d w:62 w:0d w:61 w:1b7f w:0c w:79 w:1b s \
+        w:1b4f51 p w:1b78 > "$TMPD/uplnc_ed_repl2.bin" 2> "$TMPD/uplnc_ed_repl2.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_repl2.bin" \
+        > "$TMPD/uplnc_ed_repl3.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_repl2.err" \
+            && grep -q '^ L1 C5  *1 occurrence replaced' "$TMPD/uplnc_ed_repl3.screen" \
+            && [ "$(cat "$TMPD/uplnc_ed_repl2.txt")" = "b1 a2" ]; then
+        ok "editor undoes a whole Replace at once; Ctrl-L repeats it"
+    else
+        bad "editor Replace undo / repeat"
+    fi
+    # Projects: a .prj names a program's units, relative to itself, skipping
+    # blank and # lines. "ed app.prj" opens the first unit with the project
+    # set, Project/Open project shows its name, and F9 builds every unit
+    # into app beside the project file.
+    mkdir -p "$TMPD/uplnc_prj"
+    printf 'func twice(x:int);\nfunc main()\n{\n  return twice(21);\n}\n' \
+        > "$TMPD/uplnc_prj/main.e"
+    printf 'func twice(x:int)\n{\n  return x+x;\n}\n' > "$TMPD/uplnc_prj/util.e"
+    printf '# the test program\nmain.e\n\n  util.e  \n' > "$TMPD/uplnc_prj/app.prj"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_prj/app.prj" w:1b70 s w:1b w:1b5b32307e "u:Build OK" \
+        w:1b78 > "$TMPD/uplnc_ed_prj.bin" 2>/dev/null
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_prj.bin" \
+        > "$TMPD/uplnc_ed_prj1.screen"
+    python3 tests/screen.py 24x80 < "$TMPD/uplnc_ed_prj.bin" \
+        > "$TMPD/uplnc_ed_prj2.screen"
+    if grep -q 'x Open project\.\.\. *app\.prj x' "$TMPD/uplnc_ed_prj1.screen" \
+            && grep -q '^func twice(x:int);$' "$TMPD/uplnc_ed_prj2.screen" \
+            && grep -q '^ L1 C1  *Build OK' "$TMPD/uplnc_ed_prj2.screen" \
+            && { "$TMPD/uplnc_prj/app"; [ $? = 42 ]; }; then
+        ok "editor opens a project and F9 builds all its units"
+    else
+        bad "editor project build"
+    fi
+    # Opened from the Project menu this time, with the error in a unit that
+    # is not open: F9 lands in util.e at it. After Close project, F9 builds
+    # the open file alone again, and main.e cannot link without util.e.
+    printf 'func twice(x:int)\n{\n  return x+;\n}\n' > "$TMPD/uplnc_prj/util.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_prj/main.e" w:1b70 w:6f \
+        w:$(edhex "$TMPD/uplnc_prj/app.prj") w:0d w:1b5b32307e \
+        "u:Build failed" w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_prj3.screen"
+    printf 'func twice(x:int)\n{\n  return x+x;\n}\n' > "$TMPD/uplnc_prj/util.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_prj/app.prj" w:1b70 w:63 w:1b5b32307e "u:Build failed" \
+        w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_prj4.screen"
+    if grep -q '^  return x+;$' "$TMPD/uplnc_ed_prj3.screen" \
+            && grep -q '^ L3 C12  *util\.e:3: Error' "$TMPD/uplnc_ed_prj3.screen" \
+            && grep -q '^ L1 C1  *Build failed' "$TMPD/uplnc_ed_prj4.screen"; then
+        ok "editor jumps to an error in another unit; Close project ends it"
+    else
+        bad "editor project error jump / close"
+    fi
+    # A project file that does not exist yet opens itself, to be filled in;
+    # F9 saves it and builds the units it now names.
+    rm -f "$TMPD/uplnc_prj/new.prj" "$TMPD/uplnc_prj/new"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_prj/new.prj" w:$(edhex main.e) w:0d w:$(edhex util.e) \
+        w:1b5b32307e "u:Build OK" w:1b78 >/dev/null 2>&1
+    if [ "$(cat "$TMPD/uplnc_prj/new.prj")" = "$(printf 'main.e\nutil.e')" ] \
+            && { "$TMPD/uplnc_prj/new"; [ $? = 42 ]; }; then
+        ok "editor writes a new project file and F9 builds it"
+    else
+        bad "editor new project"
+    fi
+    # The IDE's own project: from a copy of ide/, "ed ed.prj" and F9 build
+    # the IDE again -- every unit, the C shim included -- and it runs.
+    mkdir -p "$TMPD/uplnc_self"
+    cp ../ide/*.e ../ide/*.he ../ide/tshim.c ../ide/ed.prj "$TMPD/uplnc_self/"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_self/ed.prj" w:1b5b32307e "u:Build OK" w:1b78 2>/dev/null \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_self.screen"
+    "$TMPD/uplnc_self/ed" >/dev/null 2>"$TMPD/uplnc_ed_self.err"
+    if grep -q '^ L1 C1  *Build OK' "$TMPD/uplnc_ed_self.screen" \
+            && grep -q '^usage: ed ' "$TMPD/uplnc_ed_self.err"; then
+        ok "editor builds itself from ide/ed.prj"
+    else
+        bad "editor self-build from ide/ed.prj"
+    fi
+    # Run (Ctrl-F9 = CSI 20;5~) builds, gives the program the terminal, and
+    # takes it back with the exit code on the status line. Alt-F5 (CSI 15;3~)
+    # shows the screen the program wrote -- the primary one, which --alt
+    # models -- until a key; Run/Arguments sets what it is passed, a quoted
+    # stretch being one argument.
+    printf 'func puts(s:*char);\nfunc main(argc:int,argv:**char)\n{\n  puts("hello from run");\n  return 40+argc;\n}\n' \
+        > "$TMPD/uplnc_ed_run.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_ed_run.e" w:1b5b32303b357e "u:Exit code 41" s \
+        w:1b5b31353b337e s w:20 s w:1b72 w:61 w:$(edhex 'x "y z"') w:0d \
+        w:1b5b32303b357e "u:Exit code 43" w:1b78 \
+        > "$TMPD/uplnc_ed_run.bin" 2> "$TMPD/uplnc_ed_run.err"
+    python3 tests/screen.py 24x80 --snap 1 < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run1.screen"
+    python3 tests/screen.py 24x80 --snap 2 --alt < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run2.screen"
+    python3 tests/screen.py 24x80 --snap 3 < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run3.screen"
+    python3 tests/screen.py 24x80 < "$TMPD/uplnc_ed_run.bin" \
+        > "$TMPD/uplnc_ed_run4.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_run.err" \
+            && grep -q '^ L1 C1  *Exit code 41$' "$TMPD/uplnc_ed_run1.screen" \
+            && [ "$(grep -v '^$' "$TMPD/uplnc_ed_run2.screen")" = "hello from run" ] \
+            && grep -q '^ *File  Edit  Search  Run' "$TMPD/uplnc_ed_run3.screen" \
+            && ! grep -q '^hello from run$' "$TMPD/uplnc_ed_run3.screen" \
+            && grep -q '^ L1 C1  *Exit code 43$' "$TMPD/uplnc_ed_run4.screen"; then
+        ok "editor runs the program, shows its screen, and passes arguments"
+    else
+        bad "editor Run / user screen / arguments"
+    fi
+    # Ctrl-C ends a running program but not the IDE, which ignores SIGINT
+    # while it waits. ctty makes the pty the controlling terminal, so the
+    # ^C becomes SIGINT for the foreground group, as at a real terminal.
+    printf 'func puts(s:*char);\nfunc main()\n{\n  puts("spinning");\n  while(1);\n  return 0;\n}\n' \
+        > "$TMPD/uplnc_ed_spin.e"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 ctty \
+        "a:$TMPD/uplnc_ed_spin.e" w:1b5b32303b357e u:spinning w:03 \
+        "u:Terminated by signal" w:1b78 2> "$TMPD/uplnc_ed_spin.err" \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_spin.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_spin.err" \
+            && grep -q '^ L1 C1  *Terminated by signal 2$' "$TMPD/uplnc_ed_spin.screen"; then
+        ok "editor Run: Ctrl-C stops the program, not the IDE"
+    else
+        bad "editor Run Ctrl-C"
     fi
 else
     echo "  skip - editor tests need python3 and a native build"

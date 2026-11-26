@@ -1,0 +1,8 @@
+# The IDE itself: "ide/ed ide/ed.prj" opens ed.e with this project set,
+# and F9 rebuilds the IDE as ide/ed.
+ed.e
+menu.e
+build.e
+buf.e
+tui.e
+tshim.c
