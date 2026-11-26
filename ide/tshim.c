@@ -20,6 +20,7 @@
 #include <string.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <time.h>
 
 static struct termios tsh_saved;
 static intptr_t tsh_have_saved = 0;
@@ -377,6 +378,18 @@ intptr_t tsh_openpty(char *name, intptr_t cap, intptr_t *slave)
     fcntl(sl, F_SETFD, FD_CLOEXEC);
     *slave = (intptr_t)sl;
     return (intptr_t)m;
+}
+
+/* A monotonic clock in milliseconds, for deadlines. Only differences mean
+ * anything: on a 32-bit target the count wraps after about 24 days, and a
+ * difference taken in the same width stays right across the wrap. */
+intptr_t tsh_clock(void)
+{
+    struct timespec t;
+    uint64_t ms;
+    if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) return 0;
+    ms = (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u;
+    return (intptr_t)ms;
 }
 
 /* the kernel's machine name (uname -m) into buf, NUL-terminated and

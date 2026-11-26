@@ -3090,6 +3090,26 @@ open(sys.argv[1],'w').write(''.join('line%02d\n'%i for i in range(60)))" \
     else
         bad "editor project error jump / close"
     fi
+    # A build that cannot start keeps the last program's name: a good build,
+    # then the project emptied (F3 opens it, five Dels, F2) and F9 twice.
+    # The second F9 used to free that name a second time and abort the IDE.
+    mkdir -p "$TMPD/uplnc_prj1"
+    printf 'func main()\n{\n  return 42;\n}\n' > "$TMPD/uplnc_prj1/one.e"
+    printf 'one.e\n' > "$TMPD/uplnc_prj1/one.prj"
+    UPLNC_DRIVER="$DRIVER" python3 tests/ptyrun.py "$TMPD/uplnc_ed" 24x80 \
+        "a:$TMPD/uplnc_prj1/one.prj" w:1b5b32307e "u:Build OK" \
+        w:1b4f52 w:$(edhex "$TMPD/uplnc_prj1/one.prj") w:0d \
+        w:1b5b337e w:1b5b337e w:1b5b337e w:1b5b337e w:1b5b337e w:1b4f51 \
+        w:1b5b32307e "u:no units listed" w:1b5b32307e "u:no units listed" p \
+        w:1b78 2> "$TMPD/uplnc_ed_prj1.err" \
+        | python3 tests/screen.py 24x80 > "$TMPD/uplnc_ed_prj1.screen"
+    if grep -q 'RC=0 TERMIOS_RESTORED=True' "$TMPD/uplnc_ed_prj1.err" \
+            && grep -q 'no units listed in project file' "$TMPD/uplnc_ed_prj1.screen" \
+            && [ -z "$(cat "$TMPD/uplnc_prj1/one.prj")" ]; then
+        ok "editor survives a project build that cannot start, twice"
+    else
+        bad "editor project build that cannot start"
+    fi
     # A project file that does not exist yet opens itself, to be filled in;
     # F9 saves it and builds the units it now names.
     rm -f "$TMPD/uplnc_prj/new.prj" "$TMPD/uplnc_prj/new"

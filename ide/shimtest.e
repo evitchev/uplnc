@@ -11,7 +11,8 @@
    to one that has gone failing instead of raising SIGPIPE here, waiting
    without hanging, a kill, SIGPIPE's default back in every kind of child,
    and an unrunnable program; and the debugged program's terminal
-   (tsh_openpty) both ways. Exit 42.
+   (tsh_openpty) both ways; and the clock (tsh_clock) across a poll's
+   timeout. Exit 42.
 
    Build: perl src/langdrv.pl -march=ARCH -o shimtest ide/shimtest.e ide/tshim.c */
 
@@ -28,6 +29,7 @@ func tsh_wait(pid:int,hang:int);
 func tsh_kill(pid:int,sig:int);
 func tsh_openpty(name:*char,cap:int,slave:*int);
 func signal(sig:int,handler:int);
+func tsh_clock();
 
 #define SIGPIPE 13       /* on every Linux target, MIPS included */
 #define SIG_DFL 0
@@ -52,7 +54,7 @@ func main()
   var [16]char:buf;
   var [4]*char:av;
   var [64]char:out;
-  var i,r,n,pid,m,sl:int;
+  var i,r,n,pid,m,sl,t0:int;
   /* GitHub's runners start jobs with SIGPIPE ignored, and the shim hands
      its children whatever this process started with; start from the
      default, so the checks that children get SIGPIPE back mean something */
@@ -182,5 +184,14 @@ func main()
   if(tsh_read(sl,buf,16)!=3)return 54;   /* a whole line, canonical input */
   if((buf[0]!='x')||(buf[2]!=10))return 55;
   if(tsh_close(sl)||tsh_close(m))return 56;
+  /* the clock: a 200 ms poll timeout takes about 200 ms by it */
+  if(tsh_pipe(fds))return 57;
+  t0=tsh_clock();
+  if(tsh_poll(fds[0],200)!=0)return 58;
+  n=tsh_clock()-t0;
+  if((n<190)||(n>5000))return 59;
+  if(tsh_clock()-t0<n)return 60;       /* it never runs backwards */
+  tsh_close(fds[0]);
+  tsh_close(fds[1]);
   return 42;
 }

@@ -1,7 +1,9 @@
 /* gdbtest.e: gdb.e's proof. First, on every backend and without gdb, a
    session fed by hand through a pipe: lines split across reads, results
    found by token out of order, a queue that grows and compacts without
-   losing order, and the end of the stream. Then, given PROGRAM, a real gdb
+   losing order, and the end of the stream; and waits that keep to their
+   time, by the clock, whether records pour in or a record trickles in a
+   byte at a time. Then, given PROGRAM, a real gdb
    session. It debugs gdbprog.e (built
    with -g): a breakpoint by file:line, a run that stops there with the
    frame and arguments, the output the program printed read from its own
@@ -25,6 +27,10 @@ func sprintf(b:*char,f:*char,...);
 func tsh_pipe(fds:*int);
 func tsh_write(fd:int,buf:*char,n:int);
 func tsh_close(fd:int);
+func tsh_child(argv:**char,fds:*int);
+func tsh_wait(pid:int,hang:int);
+func tsh_kill(pid:int,sig:int);
+func tsh_clock();
 
 var gtn:int;
 var gtout:[8192]char;    /* everything the program printed */
@@ -53,8 +59,9 @@ func gteq(a:*char,b:*char)
 /* read the program's terminal until want shows up, for up to 10 s */
 func gtsee(g:*sgdb,want:*char)
 {
-  var n,ms:int;
-  for(ms=10000;ms>0;ms=ms-100)
+  var n,t0:int;
+  t0=tsh_clock();
+  while(tsh_clock()-t0<10000)
   {
     gtout[gtlen]=0;
     if(strstr(gtout,want))return 1;
@@ -145,6 +152,58 @@ func gtqueue()
   return 0;
 }
 
+/* a session reading what the shell script prints, standing in for gdb */
+func gtfeeder(g:*sgdb,script:*char,fds:*int)
+{
+  var [4]*char:av;
+  var pid:int;
+  av[0]="sh";
+  av[1]="-c";
+  av[2]=script;
+  av[3]=0;
+  g->init();
+  pid=tsh_child(av,fds);
+  g->out=fds[1];
+  return pid;
+}
+
+/* waits keep to their time by the clock, not by what arrives */
+func gtclock()
+{
+  var g:sgdb;
+  var [2]int:fds;
+  var r:*mirec;
+  var pid,t0,e:int;
+  /* a record every 10 ms, never the one awaited: 300 ms is 300 ms */
+  pid=gtfeeder(&g,"i=0; while [ $i -lt 1000 ]; do echo '=thread-created,id=\"1\"'; sleep 0.01; i=$((i+1)); done",fds);
+  ck(pid>0);
+  t0=tsh_clock();
+  r=g.wait(MR_EXEC,"stopped",300);
+  e=tsh_clock()-t0;
+  ck(r==0);
+  ck(e>=300);
+  ck(e<2000);
+  ck(g.qn>g.qh);                 /* the chatter itself was queued */
+  tsh_kill(pid,9);
+  tsh_wait(pid,1);
+  tsh_close(fds[0]);
+  g.stop();
+  /* the awaited record a byte every 10 ms: found well inside 1.5 s */
+  pid=gtfeeder(&g,"s='*stopped,reason=\"exited-normally\",thread-group=\"i1\"'; while [ -n \"$s\" ]; do printf %s \"${s%\"${s#?}\"}\"; s=${s#?}; sleep 0.01; done; echo",fds);
+  ck(pid>0);
+  t0=tsh_clock();
+  r=g.wait(MR_EXEC,"stopped",1500);
+  e=tsh_clock()-t0;
+  ck(r!=0);
+  ck(gteq(r->str("reason"),"exited-normally"));
+  ck(e<1500);
+  r->done();
+  tsh_wait(pid,1);
+  tsh_close(fds[0]);
+  g.stop();
+  return 0;
+}
+
 func main(argc:int,argv:**char)
 {
   var g,h:sgdb;
@@ -152,6 +211,7 @@ func main(argc:int,argv:**char)
   var gdb:*char;
   var seen,n,bad:int;
   gtqueue();
+  gtclock();
   if(argc<2)return 42;
   gdb="gdb";
   if(argc>2)gdb=argv[2];

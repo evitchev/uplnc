@@ -1076,7 +1076,9 @@ What turns a teaching compiler into something you'd build a project with:
       what Ctrl-L repeats after it. **Projects** are Turbo C 2.0's text .PRJ:
       one unit per line, relative to the project file, all built by F9 into
       the program named after it; `ed app.prj` or Project/Open project sets
-      one, and an error in an unopened unit opens it. `ide/ed.prj` lets the
+      one, and an error in an unopened unit opens it (a review fix: a
+      project build that cannot start no longer leaves the last program's
+      name freed, which the next build freed again). `ide/ed.prj` lets the
       IDE rebuild itself, which `[15]` proves. **Run** (Ctrl-F9) builds, then
       hands the program the terminal itself and takes it back, reporting the
       exit code or signal; Alt-F5 shows the user screen it wrote, and
@@ -1100,8 +1102,9 @@ What turns a teaching compiler into something you'd build a project with:
       and a real breakpoint-run-step-exit session where gdb is installed,
       which CI's two test jobs now do (so `[12]`'s debugger checks run
       there too). Every child the shim starts now gets SIGPIPE's default
-      back. Next: slice 2b, breakpoints and stepping in the editor
-      (IDE.md §7).
+      back. Every wait runs against a monotonic clock (`tsh_clock`; a
+      review found the first version counting records, not time). Next:
+      slice 2b, breakpoints and stepping in the editor (IDE.md §7).
 - 💭 Module/namespace system; package layout
 - ✅ Robustness: the original compiler can loop or corrupt memory on malformed
   input — add limits / graceful errors. Fixed so far: non-constant array
