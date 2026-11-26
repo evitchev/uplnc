@@ -101,7 +101,10 @@ jobs:
 
   fixpoint-riscv64:
     name: Self-host fixpoint (riscv64, qemu)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now 26.04, where qemu-user-static is only
+    # a virtual package and the install fails; 24.04 also keeps qemu 8.2.2,
+    # the version local strict-alignment MIPS checks are matched against.
+    runs-on: ubuntu-24.04
     # No native RISC-V runner: cross-compile with gcc-riscv64-linux-gnu and run
     # the riscv64 binaries via qemu-user-static (binfmt). Gates the riscv64
     # self-host fixpoint and the run-correctness section of run_tests.sh.
@@ -123,7 +126,10 @@ jobs:
 
   fixpoint-mips64:
     name: Self-host fixpoint (mips64, qemu)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now 26.04, where qemu-user-static is only
+    # a virtual package and the install fails; 24.04 also keeps qemu 8.2.2,
+    # the version local strict-alignment MIPS checks are matched against.
+    runs-on: ubuntu-24.04
     # No native MIPS runner: cross-compile with gcc-mips64-linux-gnuabi64 and run
     # the big-endian N64 binaries via qemu-user-static (binfmt). This is the only
     # big-endian self-host target, so it also guards endianness assumptions.
