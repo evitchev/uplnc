@@ -1,7 +1,7 @@
 # A Turbo-style IDE in UPLNC — feasibility assessment and design plan
 
-Assessed 2026-07. Status: **in progress; phase 1 landed** (slice 1a 2026-08,
-slice 1b 2026-10, slice 1c 2026-11) —
+Assessed 2026-07. Status: **in progress; phase 1 landed, phase 2 begun**
+(slice 1a 2026-08, slice 1b 2026-10, slice 1c 2026-11; slice 2a 2026-11) —
 this document records the settled design and its implementation progress (the
 ROADMAP links here from the M6 tooling item). The goal: a full-screen text-mode
 IDE in the spirit
@@ -304,6 +304,50 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
 3. **Phase 2**: gdb/MI debugging — structured MI parser, dedicated inferior
    PTY and console pane, breakpoint margin, F7/F8, watch and call-stack
    windows.
+   - ✅ **Slice 2a: the MI parser, a gdb session, the program's own
+     terminal** (2026-11), everything below the debugger's UI. `mi.e`
+     parses one line of gdb's output into a record (result, exec, status
+     or notify, with token and class; or a console, target or log stream)
+     whose results hang off a tuple and are reached by a dotted path of
+     names and list indexes (`frame.args.1.value`). It decodes every C
+     string escape, nests at most 32 deep, and turns any line that is not a
+     record -- gdb's stderr, a truncated read, garbage -- into `MR_OTHER`
+     with its text, so the caller never sees a half-built record or an
+     error to handle. `gdb.e` is one session: gdb runs on a pipe each way
+     (`--interpreter=mi2 -nx -q`), commands carry tokens, every record is
+     queued in arrival order, `result()` waits for one command's answer and
+     `wait()` for one async record such as `*stopped`, and everything else
+     stays queued for the UI. The debugged program gets a pseudo-terminal
+     of its own (`-inferior-tty-set`), so its output and input never touch
+     the MI stream. The shim gained `tsh_child` (the two pipes, close-on-
+     exec, a session of its own), `tsh_wait`, `tsh_kill` and `tsh_openpty`.
+     Tests in `[16]`: `mitest.e` proves the parser on all five backends
+     without gdb (real gdb 10.2 records, every escape, 27 kinds of
+     malformed line, the nesting limit, a 100,000-byte line); `gdbtest.e`
+     feeds a session by hand through a pipe on every backend with a C
+     toolchain (lines split across reads, results found by token out of
+     order, the queue growing and compacting); and, where gdb is
+     installed, runs a real session:
+     break at `file:line`, run, stop with the frame and arguments, read the
+     program's output from its terminal and type its input there, evaluate,
+     list the stack, continue to the exit code, and exit cleanly. Both
+     programs are leak-free under LeakSanitizer, and 26 of 27 deliberate
+     mutations of `mi.e` and `gdb.e` make them fail (the survivor drops a
+     10-second timeout for a gdb that never prompts).
+   - **Findings**: none in the language; all at the boundary again.
+     - gdb before 13 prints a breakpoint's extra locations as bare tuples
+       after `bkpt={...}`, which its own grammar forbids, so the parser
+       keeps unnamed elements; and an `exit-code` is octal (`"052"` is 42).
+     - Writing to a child means SIGPIPE must be ignored, and an ignored
+       signal survives exec, so every child the shim starts -- builds and
+       Run too -- now restores it first; `shimtest.e` checks each kind.
+     - The program's terminal must stay open on the IDE's side, or its
+       master reads a hangup whenever no program holds it.
+     - CI's runners had no gdb, so `[12]`'s debugger checks never ran
+       there; the two test jobs now install it.
+   - **Next**: slice 2b, the debugger in the editor -- the breakpoint
+     margin (Ctrl-F8), F7/F8/F4 and the execution line, the program's
+     terminal as a console pane; then 2c, the watch and call-stack windows.
 4. **Phase 3**: overlapping/resizable windows, language profiles, help
    viewer from external files.
 5. **Phase 4 (optional)**: native ptrace backend, x86_64 first.

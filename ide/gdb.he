@@ -1,0 +1,52 @@
+/* gdb.he: a gdb session for the IDE's debugger (IDE.md section 4).
+
+   gdb runs as a child on two pipes (tsh_child): the IDE writes MI commands
+   to its stdin and reads MI records (mi.he) from its stdout and stderr. The
+   program being debugged gets a pseudo-terminal of its own (tsh_openpty),
+   chosen with -inferior-tty-set, so its output and its input never mix
+   with the MI stream: what it prints is read from the pty, and what it
+   reads is typed into the pty.
+
+   Every record gdb sends is queued in arrival order. result() sends a
+   command and waits for the result record carrying its token; wait()
+   waits for one async record, such as *stopped; everything else stays
+   queued, in order, for take(). Records taken from the session belong to
+   the caller, who frees them with done(). */
+
+#include "mi.he"
+
+#define GD_LINE 4096     /* initial line buffer, doubled as needed */
+#define GD_QUEUE 16      /* initial queue slots, doubled as needed */
+#define GD_PTYNAME 64
+
+struct sgdb{
+  int pid;               /* gdb's process, or 0 when there is none */
+  int in;                /* gdb's stdin */
+  int out;               /* gdb's stdout and stderr */
+  int pty;               /* the debugged program's terminal, master side */
+  int ptys;              /* its slave side, held open (tsh_openpty) */
+  [GD_PTYNAME]char ptyname;
+  *char lb;              /* the part of a line read so far */
+  int ln;
+  int la;
+  **mirec q;             /* records read and not yet taken: q[qh..qn-1] */
+  int qh;
+  int qn;
+  int qa;
+  int tok;               /* the last token sent */
+  int dead;              /* gdb's output has ended */
+  func init;             /* empty buffers, no gdb, no pty (start does this) */
+  func start;            /* start gdb (path) for prog: 0, or a negative step */
+  func send;             /* send one MI command: its token, or -1 */
+  func poll;             /* queue what gdb sends within ms: how many, -1 at its end */
+  func push;             /* queue one record */
+  func take:*mirec;      /* the oldest queued record, or 0 */
+  func find:*mirec;      /* take the first queued record matching, or 0 */
+  func result:*mirec;    /* send cmd; its result record within ms, or 0 */
+  func wait:*mirec;      /* a record of type t and class cls within ms, or 0 */
+  func ptyread;          /* the program's output, up to cap bytes within ms */
+  func ptywrite;         /* type n bytes at the program */
+  func stop;             /* end gdb and free the session: gdb's exit status */
+};
+
+func gdnum(s:*char);     /* an MI number: decimal, or octal after a leading 0 */

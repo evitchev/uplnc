@@ -3148,10 +3148,13 @@ else
     echo "  skip - editor tests need python3 and a native build"
 fi
 
-echo "[16] IDE debugger: the gdb/MI parser"
-# The MI parser is pure logic, so it is proved on every backend with a
-# toolchain: mitest.e parses real and malformed records.
-for spec in "mitest:../ide/mitest.e ../ide/mi.e:MI parser"; do
+echo "[16] IDE debugger: the gdb/MI parser and a gdb session"
+# The MI parser is pure logic, and gdb.e's line assembly and record queue can
+# be fed through a pipe, so both are proved on every backend with a
+# toolchain: mitest.e parses real and malformed records, gdbtest.e without
+# arguments feeds a session by hand. A real session needs gdb on the host.
+for spec in "mitest:../ide/mitest.e ../ide/mi.e:MI parser" \
+            "gdbtest:../ide/gdbtest.e ../ide/gdb.e ../ide/mi.e ../ide/tshim.c:gdb session queue"; do
     name=${spec%%:*}; rest=${spec#*:}
     srcs=${rest%%:*}; what=${rest#*:}
     if [ -z "$TUIHOST" ]; then
@@ -3192,6 +3195,29 @@ for spec in "mitest:../ide/mitest.e ../ide/mi.e:MI parser"; do
         fi
     fi
 done
+if [ -z "$TUIHOST" ]; then
+    echo "  skip - no native UPLNC target for host $(uname -m)"
+elif ! command -v gdb >/dev/null; then
+    echo "  skip - no gdb on host"
+else
+    # The program sits in a directory with a blank in its name, so the path
+    # gdb is given must travel as an MI C string.
+    GDBDIR="$TMPD/uplnc gdb dir"
+    mkdir -p "$GDBDIR"
+    cp ../ide/gdbprog.e "$GDBDIR/gdbprog.e"
+    if (cd "$GDBDIR" && perl "$DRIVER" "-march=$DRVARCH" -g -o gdbprog gdbprog.e) \
+            >/dev/null 2>&1 && [ -x "$TMPD/uplnc_gdbtest" ]; then
+        (cd "$GDBDIR" && timeout 300 "$TMPD/uplnc_gdbtest" "$GDBDIR/gdbprog" \
+            > "$TMPD/uplnc_gdbtest.out" 2>&1)
+        if [ $? = 42 ]; then
+            ok "gdb session: break, run, stop, the program's own terminal, exit"
+        else
+            bad "gdb session ($(head -1 "$TMPD/uplnc_gdbtest.out"))"
+        fi
+    else
+        bad "gdb session: building gdbprog or gdbtest"
+    fi
+fi
 
 echo
 echo "==== $pass passed, $fail failed ===="
