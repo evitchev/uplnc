@@ -124,3 +124,6 @@ struct_temp 42
 block_scope 42
 long_names 42
 fp_discard 42
+compound_assign 42
+compound_fp 42
+compound_ll 42

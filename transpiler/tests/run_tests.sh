@@ -683,6 +683,23 @@ EMPTYINIT
         bad "const parameter ++ rejected"
     fi
 
+    # compound assignment takes `=`'s target rules (an lvalue, not const) and
+    # a scalar target: one error per bad statement, on its own line
+    printf 'struct pt{int x;};\nvar const [2]int:ca={1,2};\nfunc main(){var int:a;var const int:c=1;var pt:s;var [3]int:v;\n(a+1)+=1;\nc-=1;\nca[0]*=2;\ns|=1;\nv<<=1;\nreturn 0;}\n' > "$TMPD/uplnc_casgn.e"
+    if "$LPP" "$TMPD/uplnc_casgn.e" 2>/dev/null \
+            | "$LANGC" -march=x86_64 > "$TMPD/uplnc_casgn.s" 2>"$TMPD/uplnc_casgn.err"; then
+        bad "compound assignment target errors exit nonzero"
+    elif [ "$(grep -c 'Error:' "$TMPD/uplnc_casgn.err")" = 5 ] \
+            && grep -q ':4: Error:must be lvalue' "$TMPD/uplnc_casgn.err" \
+            && grep -q ':5: Error:assignment to a const variable' "$TMPD/uplnc_casgn.err" \
+            && grep -q ':6: Error:assignment to a const array element' "$TMPD/uplnc_casgn.err" \
+            && grep -q ':7: Error:compound assignment to a struct or an array' "$TMPD/uplnc_casgn.err" \
+            && grep -q ':8: Error:compound assignment to a struct or an array' "$TMPD/uplnc_casgn.err"; then
+        ok "compound assignment target errors"
+    else
+        bad "compound assignment target errors"
+    fi
+
     # aggregate params must be rejected: the callee would lay them out by value
     # while the caller passes a pointer -- silent garbage pre-fix (PR #86 review)
     printf 'struct pr{int a;int b;};\nfunc f(p:pr){return p.a;}\nfunc main(){var s:pr;s.a=1;return f(s);}\n' > "$TMPD/uplnc_structpar.e"

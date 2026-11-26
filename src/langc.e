@@ -3616,6 +3616,8 @@ func pretree(node:*enode,ofil:*int)
     fprintf(ofil,"%s",node->name);
     else if(node->leaf.vid==L_VAST)
     fprintf(ofil,"vastart()");
+    else if(node->leaf.vid==L_CUR)
+    fprintf(ofil,"@");
     else
     error("unknown leaf");
   }
@@ -3636,6 +3638,10 @@ func pretree(node:*enode,ofil:*int)
     fprintf(ofil,"?");
   }
   else if(node->op==OP_ASSIGN)
+  {
+    fprintf(ofil,"=");
+  }
+  else if(node->op==OP_CASSIGN)   /* a op= b echoes as (a=(@ op b)) */
   {
     fprintf(ofil,"=");
   }
@@ -3774,6 +3780,8 @@ func cttype(node:*enode)
     {if(target.arch==ARCH_I386)return T_LLONG;return T_INT;}
     else if(node->leaf.vid==L_VAST)
     return T_INTP;
+    else if(node->leaf.vid==L_CUR)
+    return node->leaf.val;
     else if(node->leaf.vid==L_ID)
     return node->leaf.idx->type;
     else if(node->leaf.vid==L_STR)
@@ -3851,7 +3859,7 @@ func cttype(node:*enode)
     t2=cttype(node->third);
     return condtype(t1,t2);
   }
-  else if(node->op==OP_ASSIGN)
+  else if((node->op==OP_ASSIGN)||(node->op==OP_CASSIGN))
   return cttype(node->l);
   return T_INT;   /* default: treat as int (e.g. call results) */
 }
@@ -3911,6 +3919,16 @@ func treetocode(node:*enode,lval:*elval)
       lval->val=0;
       return 0;
     }
+    else if(node->leaf.vid==L_CUR)
+    {
+      /* a op= b: a's value, already in the accumulator (ct_CASSIGN) */
+      lval->sort=L_ONREG;
+      lval->idx=0;
+      lval->offset=0;
+      lval->typ=node->leaf.val;
+      lval->val=0;
+      return 0;
+    }
     else if(node->leaf.vid==L_ID)
     {
       lval->sort=L_ID;
@@ -3965,6 +3983,8 @@ func treetocode(node:*enode,lval:*elval)
   return ct_MINUS(node,lval);
   else if(node->op==OP_ASSIGN)
   return ct_ASSIGN(node,lval);
+  else if(node->op==OP_CASSIGN)
+  return ct_CASSIGN(node,lval);
   else if(node->op==OP_MUL)
   return ct_MUL(node,lval);
   else if(node->op==OP_DIV)
@@ -4126,13 +4146,48 @@ func ct_ASSIGN(node:*enode,lval:*elval)
   store(&lval1);
   return 0;
 }
+/* a op= b (OP_CASSIGN, built by hier1): a is evaluated once. When a is reached
+   through a pointer its address is pushed for the final store, as for ++; then
+   a's value is loaded and stands for the L_CUR leaf on the left of node->r,
+   the ordinary binary op (@ op b), so every operand rule of op -- pointer
+   scaling, FP, unsigned, 64-bit -- applies as in a = a op b. The result is
+   converted and stored as by `=`. */
+func ct_CASSIGN(node:*enode,lval:*elval)
+{
+  var int:k;
+  var elval:lval1,lval2;
+  k=treetocode(node->l,&lval1);
+  if(!k){needlval();return 0;}
+  if((lval1.sort==L_ID)&&lval1.idx&&lval1.idx->cnst)
+  error("assignment to a const variable");
+  if(constarr(node->l))error("assignment to a const array element");
+  if((typtab[lval1.typ].sort==V_STR)||(typtab[lval1.typ].sort==V_ARR))
+  {error("compound assignment to a struct or an array");return 0;}
+  lval2=lval1;
+  if(lval1.sort==L_POI)
+  {
+    zpush();
+    lval1.sort=L_SP;
+  }
+  rvalue(&lval2);   /* lval2 decays a float to double; lval1 keeps its width */
+  node->r->l->leaf.val=lval2.typ;
+  if(treetocode(node->r,&lval2))rvalue(&lval2);
+  convto(lval1.typ,lval2.typ);
+  lval->sort=L_ONREG;
+  lval->idx=0;
+  lval->offset=0;
+  lval->typ=fpdecay(lval1.typ);
+  if(fpkeep(node,lval1.typ))fdup();
+  store(&lval1);
+  return 0;
+}
 /* the type of a loaded or assigned value: a float is held as a double */
 func fpdecay(t:int)
 {
   if(t==T_FLOAT)return T_DOUBLE;
   return t;
 }
-/* i386 x87: must an assignment-like node (=, ++, --) keep a copy of its
+/* i386 x87: must an assignment-like node (=, op=, ++, --) keep a copy of its
    FP result past the popping store? Only when its value is used; a discarded
    one (novalue) leaves nothing behind. Other targets keep FP values in a
    register that the store does not consume. */
@@ -4146,7 +4201,7 @@ func fpkeep(node:*enode,t:int)
 func fpdiscard(node:*enode,t:int)
 {
   if((target.arch!=ARCH_I386)||!isfp(t)||!node)return;
-  if((node->op==OP_ASSIGN)||(node->op==OP_1PP)
+  if((node->op==OP_ASSIGN)||(node->op==OP_CASSIGN)||(node->op==OP_1PP)
   ||(node->op==OP_1MM)||(node->op==OP_2PP)||(node->op==OP_2MM))return;
   fdrop();
 }
@@ -5729,9 +5784,39 @@ func hcomma()
     else return node;
   }
 }
+/* the length of the compound assignment operator (+= -= *= /= %= &= |= ^=
+   <<= >>=) at the input, or 0. The binary-operator levels below hier1 stop
+   at one rather than take its first character for their own operator. */
+func asgnlen()
+{
+  var *char:p;
+  blanks();
+  p=line+lptr;
+  if(!p[0])return 0;
+  if(((p[0]=='<')||(p[0]=='>'))&&(p[1]==p[0])&&(p[2]=='='))return 3;
+  if(p[1]!='=')return 0;
+  if((p[0]=='+')||(p[0]=='-')||(p[0]=='*')||(p[0]=='/')||(p[0]=='%')
+  ||(p[0]=='&')||(p[0]=='|')||(p[0]=='^'))return 2;
+  return 0;
+}
+/* the binary operator of the compound assignment operator at p */
+func asgnop(p:*char)
+{
+  if(p[0]=='+')return OP_PLUS;
+  if(p[0]=='-')return OP_MINUS;
+  if(p[0]=='*')return OP_MUL;
+  if(p[0]=='/')return OP_DIV;
+  if(p[0]=='%')return OP_REM;
+  if(p[0]=='&')return OP_BAND;
+  if(p[0]=='|')return OP_BOR;
+  if(p[0]=='^')return OP_BXOR;
+  if(p[0]=='<')return OP_SHL;
+  return OP_SHR;
+}
 func hier1()
 {
-  var *enode:node,newnode;
+  var *enode:node,newnode,opnode,cur;
+  var int:k;
   node=hcond();
   if(match("="))
   {
@@ -5740,6 +5825,27 @@ func hier1()
     newnode->r=hier1();
     newnode->third=0;
     newnode->op=OP_ASSIGN;
+    node=newnode;
+  }
+  else if(k=asgnlen())
+  {
+    /* a op= b is OP_CASSIGN(a, (@ op b)): the L_CUR leaf @ stands for a's
+       value, which ct_CASSIGN loads once, after a's address */
+    opnode=getenode();
+    opnode->op=asgnop(line+lptr);
+    lptr=lptr+k;
+    cur=getenode();
+    cur->op=OP_LEAF;
+    cur->leaf.vid=L_CUR;
+    cur->leaf.val=T_INT;
+    opnode->l=cur;
+    opnode->r=hier1();
+    opnode->third=0;
+    newnode=getenode();
+    newnode->l=node;
+    newnode->r=opnode;
+    newnode->third=0;
+    newnode->op=OP_CASSIGN;
     node=newnode;
   }
   return node;
@@ -5839,6 +5945,7 @@ func hbor()
   while(1)
   {
     blanks();
+    if(asgnlen())return node;
     if(streq(line+lptr,"|")&&!streq(line+lptr,"||"))
     {
       gch();
@@ -5863,6 +5970,7 @@ func hbxor()
   while(1)
   {
     blanks();
+    if(asgnlen())return node;
     if(streq(line+lptr,"^")&&!streq(line+lptr,"^^"))
     {
       gch();
@@ -5886,6 +5994,7 @@ func hband()
   while(1)
   {
     blanks();
+    if(asgnlen())return node;
     if(ch()=='&'&&!streq(line+lptr,"&&"))
     {
       gch();
@@ -5993,6 +6102,7 @@ func hshift()
   return node;
   while(1)
   {
+    if(asgnlen())return node;
     if(match("<<"))
     {
       newnode=getenode();
@@ -6023,6 +6133,7 @@ func hplusminus()
   return node;
   while(1)
   {
+    if(asgnlen())return node;
     if(match("+"))
     {
       newnode=getenode();
@@ -6054,6 +6165,7 @@ func hmuldiv()
   return node;
   while(1)
   {
+    if(asgnlen())return node;
     if(match("*"))
     {
       newnode=getenode();

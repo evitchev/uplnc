@@ -937,6 +937,25 @@ What turns a teaching compiler into something you'd build a project with:
     `long_names` golden test on all five backends (both 63-character limits,
     names sharing 15 or 62 leading characters); harness checks pin the 63/64
     boundary in lpp1 and langc and the mangle limit.
+  - ✅ **Compound assignment** (2026-11): `+= -= *= /= %= &= |= ^= <<= >>=`,
+    right-associative at `=`'s precedence. `a op= b` parses to
+    `OP_CASSIGN(a, (@ op b))`, where the `L_CUR` leaf `@` stands for `a`'s
+    value: `ct_CASSIGN` evaluates `a` once (pushing its address first when it
+    is reached through a pointer, as `++` does), loads the value, and then
+    generates the ordinary binary operator, so pointer scaling, floating,
+    unsigned and 64-bit rules are exactly those of `a = a op b`; the result is
+    converted and stored as by `=`. The binary-operator levels below
+    assignment stop at a compound operator rather than take its first
+    character (`asgnlen`). The target must be a scalar lvalue, and a `const`
+    one gets `=`'s errors. The stage-0 transpiler already mapped these
+    operators onto C's; only langc lacked them. Nothing in the tree used
+    them, so only `langc.e`'s own output changes, and all five fixpoints
+    reach. `compound_assign`/`compound_fp`/`compound_ll` golden tests on all
+    five backends (every operator; locals, globals, elements, fields, through
+    a pointer and in a method; the target evaluated once; the expression's
+    value; `char`, `unsigned`, `float`, `long long` and int-with-`double`
+    targets), and a harness check for the target errors. The x87 and `float`
+    fixes under M4 came out of this work.
   - ✅ **1023-byte source lines and a growing macro table** (2026-10). The
     158-byte line had become the tighter bound on long names (two 63-character
     names and little else). lpp1's line and output buffers and langc's
