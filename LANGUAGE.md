@@ -543,7 +543,9 @@ The following grammar is ordered from lowest to highest precedence:
 expression             = assignment-expression
                          { "," assignment-expression } ;
 assignment-expression  = conditional-expression
-                         [ "=" assignment-expression ] ;
+                         [ assignment-operator assignment-expression ] ;
+assignment-operator    = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                       | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 conditional-expression = logical-or-expression
                          [ "?" conditional-expression ":"
                                conditional-expression ] ;
@@ -593,14 +595,19 @@ shift, comparison, and bitwise operators associate left-to-right. Parentheses
 are required to use an assignment or comma expression as a conditional arm or
 as one function argument.
 
-Only simple `=` assignment exists. Compound assignment operators and casts are
-not supported.
+A compound assignment `a op= b` is `a = a op b` with `a` evaluated once: the
+operands follow the rules of the binary operator `op` (pointer scaling,
+floating, unsigned, 64-bit), and the result is converted to `a`'s type and
+stored as by `=`. The target must be a scalar lvalue; a structure or array
+target is an error. Casts are not supported.
 
 ### 9.2 Values and lvalues
 
 Named variables, dereferenced pointers, array elements, and data fields are
 lvalues. Assignment, address-of, and increment/decrement require an appropriate
-lvalue. Assignment evaluates to the converted value stored in its destination.
+lvalue. Assignment, simple or compound, evaluates to the converted value stored
+in its destination; for a `float` destination that value is the `double` that
+was narrowed for the store.
 Prefix increment/decrement evaluates to the new value; postfix evaluates to the
 old value.
 
@@ -817,7 +824,7 @@ UPLNC is C-like but is not C. Version 0 does not include, among other things:
 
 - `void`, `bool`, `short`, `signed`, unions, bit-fields, or typedefs;
 - C declarator syntax, casts, typed function pointers, or function types;
-- compound assignments, `goto`, labels outside `switch`, or inline assembly;
+- `goto`, labels outside `switch`, or inline assembly;
 - `static`, `register`, `volatile`, `restrict`, or transitive const types;
 - designated or nested aggregate initializers, or separately initialized
   declarators in one declaration;

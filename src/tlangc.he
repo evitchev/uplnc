@@ -196,6 +196,7 @@ struct sundecl{
 #define OP_FUNC   34
 #define OP_DOT    35
 #define OP_LIST   36
+#define OP_CASSIGN 37 /* a op= b: l = a, r = (@ op b), @ an L_CUR leaf */
 
 #define L_NUM 1
 #define L_ID  2
@@ -210,6 +211,7 @@ struct sundecl{
 #define L_FNUM 6 /* M4: floating-point literal (index into the float pool) */
 #define L_WNUM 7 /* wide (64-bit) integer literal: kept as text (float-pool index), the assembler computes the value */
 #define L_VAST 8 /* vastart(): pointer to the first variadic argument of the current function */
+#define L_CUR  9 /* a op= b: a's value, already loaded by ct_CASSIGN; leaf.val is its type */
 struct eleaf{
   int vid;
   int val;/* number or index in the symbol table*/
@@ -222,6 +224,7 @@ struct enode{
   int op;
   eleaf leaf;
   [NAMESIZE]char name;
+  int novalue; /* the value is discarded (expdiscard, comma's left operand): see fpkeep */
 };
 
 struct elval{

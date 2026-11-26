@@ -237,6 +237,23 @@ literals are emitted as `.double <text>` so the assembler computes the IEEE bits
   `fildll` of a zero-extended word on i386, the same trick on mips). Nested `?:`
   type propagation fixed in `cttype`. `fp_ternary_nested`/`fp_nan`/`fp_uint`
   golden tests on all five backends; fixpoints byte-identical
+- ✅ x87 stack balance and `float` `++`/`--` (2026-11, found while adding
+  compound assignment). On i386 every FP value takes one of the eight x87
+  slots, but an FP `++`/`--` statement kept a copy nobody popped (eight in a
+  loop overflowed the stack), a discarded FP value (a `double`-returning call
+  statement, a comma's left side) was never popped, and an FP assignment used
+  as a value (`x = (d = 1.5)`) had already been popped by its store.
+  Expression statements and `for` clauses now go through `expdiscard`, which
+  marks the expression `novalue`: an assignment-like node there keeps no copy
+  (`fpkeep`), and any other FP result is popped (new i386-only `CD_FDROP`),
+  while an assignment whose value is used keeps one (`FDUP`). On every
+  backend, `++`/`--` on a `float` stored the double it had loaded (8 bytes
+  into a 4-byte slot), and a `float` assignment's value kept the type `float`
+  although it is held as a double, so `(f = 1.5) + 1.0` miscomputed; both now
+  store at the declared width and type the value `double` (`fpdecay`). In the
+  corpus only i386 FP `++`/`--` statements change (the copy and its
+  correction go); every other unit is byte-identical on all five targets, and
+  all five fixpoints reach. `fp_discard` golden test on all five backends
 - ✅ 64-bit integers (`long long`) — done; see the dedicated section below
 
 ## M4B — 64-bit integers (`long long`) ✅
@@ -920,6 +937,25 @@ What turns a teaching compiler into something you'd build a project with:
     `long_names` golden test on all five backends (both 63-character limits,
     names sharing 15 or 62 leading characters); harness checks pin the 63/64
     boundary in lpp1 and langc and the mangle limit.
+  - ✅ **Compound assignment** (2026-11): `+= -= *= /= %= &= |= ^= <<= >>=`,
+    right-associative at `=`'s precedence. `a op= b` parses to
+    `OP_CASSIGN(a, (@ op b))`, where the `L_CUR` leaf `@` stands for `a`'s
+    value: `ct_CASSIGN` evaluates `a` once (pushing its address first when it
+    is reached through a pointer, as `++` does), loads the value, and then
+    generates the ordinary binary operator, so pointer scaling, floating,
+    unsigned and 64-bit rules are exactly those of `a = a op b`; the result is
+    converted and stored as by `=`. The binary-operator levels below
+    assignment stop at a compound operator rather than take its first
+    character (`asgnlen`). The target must be a scalar lvalue, and a `const`
+    one gets `=`'s errors. The stage-0 transpiler already mapped these
+    operators onto C's; only langc lacked them. Nothing in the tree used
+    them, so only `langc.e`'s own output changes, and all five fixpoints
+    reach. `compound_assign`/`compound_fp`/`compound_ll` golden tests on all
+    five backends (every operator; locals, globals, elements, fields, through
+    a pointer and in a method; the target evaluated once; the expression's
+    value; `char`, `unsigned`, `float`, `long long` and int-with-`double`
+    targets), and a harness check for the target errors. The x87 and `float`
+    fixes under M4 came out of this work.
   - ✅ **1023-byte source lines and a growing macro table** (2026-10). The
     158-byte line had become the tighter bound on long names (two 63-character
     names and little else). lpp1's line and output buffers and langc's
