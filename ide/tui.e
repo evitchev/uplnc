@@ -196,6 +196,22 @@ func tuifill(x:int,y:int,w:int,h:int,c:int,attr:int)
   return 0;
 }
 
+/* Turbo's drop shadow: the cells keep their glyphs but go dark grey on
+   black, so whatever lies under a menu or dialog still shows through */
+func tuishadow(x:int,y:int,w:int,h:int)
+{
+  var i,j,cell:int;
+  for(j=y;j<y+h;j++)
+  for(i=x;i<x+w;i++)
+  {
+    if((i<0)||(j<0)||(i>=tui_w)||(j>=tui_h))continue;
+    cell=tui_back[j*tui_w+i];
+    if((cell/256)>=A_ACS)tui_back[j*tui_w+i]=(cell&255)+256*(A_ACS+8);
+    else tui_back[j*tui_w+i]=(cell&255)+256*8;
+  }
+  return 0;
+}
+
 /* a single-line box in the DEC line-drawing charset */
 func tuibox(x:int,y:int,w:int,h:int,attr:int)
 {
@@ -310,10 +326,12 @@ func kbyte(ms:int)
   return b[0];
 }
 
-/* decode a CSI sequence after ESC [ was read: arrows, nav keys, Fn via ~ */
+/* decode a CSI sequence after ESC [ was read: arrows, nav keys, Fn via ~,
+   and F1-F4 in their modified CSI form; a modifier parameter m (xterm's
+   1 + shift + 2*alt + 4*ctrl) adds K_SHIFT/K_ALT/K_CTRL to the key */
 func kcsi()
 {
-  var c,n,keyn,hasmod:int;
+  var c,n,keyn,hasmod,k:int;
   n=keyn=hasmod=0;
   while(1)
   {
@@ -326,39 +344,51 @@ func kcsi()
       if(!hasmod)keyn=n;
       hasmod=1;
       n=0;
-      continue;                 /* modifiers are ignored in this slice */
+      continue;                 /* the key number; the modifier follows */
     }
     break;
   }
   if(!hasmod)keyn=n;
-  if(c=='A')return K_UP;
-  if(c=='B')return K_DOWN;
-  if(c=='C')return K_RIGHT;
-  if(c=='D')return K_LEFT;
-  if(c=='H')return K_HOME;
-  if(c=='F')return K_END;
+  k=K_NONE;
+  if(c=='A')k=K_UP;
+  if(c=='B')k=K_DOWN;
+  if(c=='C')k=K_RIGHT;
+  if(c=='D')k=K_LEFT;
+  if(c=='H')k=K_HOME;
+  if(c=='F')k=K_END;
+  if(c=='P')k=K_F1;
+  if(c=='Q')k=K_F2;
+  if(c=='R')k=K_F3;
+  if(c=='S')k=K_F4;
   if(c=='~')
   {
-    if(keyn==1)return K_HOME;
-    if(keyn==2)return K_INS;
-    if(keyn==3)return K_DEL;
-    if(keyn==4)return K_END;
-    if(keyn==5)return K_PGUP;
-    if(keyn==6)return K_PGDN;
-    if(keyn==11)return K_F1;
-    if(keyn==12)return K_F2;
-    if(keyn==13)return K_F3;
-    if(keyn==14)return K_F4;
-    if(keyn==15)return K_F5;
-    if(keyn==17)return K_F6;
-    if(keyn==18)return K_F7;
-    if(keyn==19)return K_F8;
-    if(keyn==20)return K_F9;
-    if(keyn==21)return K_F10;
-    if(keyn==23)return K_F11;
-    if(keyn==24)return K_F12;
+    if(keyn==1)k=K_HOME;
+    if(keyn==2)k=K_INS;
+    if(keyn==3)k=K_DEL;
+    if(keyn==4)k=K_END;
+    if(keyn==5)k=K_PGUP;
+    if(keyn==6)k=K_PGDN;
+    if(keyn==11)k=K_F1;
+    if(keyn==12)k=K_F2;
+    if(keyn==13)k=K_F3;
+    if(keyn==14)k=K_F4;
+    if(keyn==15)k=K_F5;
+    if(keyn==17)k=K_F6;
+    if(keyn==18)k=K_F7;
+    if(keyn==19)k=K_F8;
+    if(keyn==20)k=K_F9;
+    if(keyn==21)k=K_F10;
+    if(keyn==23)k=K_F11;
+    if(keyn==24)k=K_F12;
   }
-  return K_NONE;
+  if((k!=K_NONE)&&hasmod&&(n>1))
+  {
+    n=n-1;
+    if(n&1)k=k+K_SHIFT;
+    if(n&2)k=k+K_ALT;
+    if(n&4)k=k+K_CTRL;
+  }
+  return k;
 }
 
 /* wait up to ms for one key event; K_NONE on timeout, K_RESIZE after a

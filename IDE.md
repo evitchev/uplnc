@@ -1,6 +1,7 @@
 # A Turbo-style IDE in UPLNC — feasibility assessment and design plan
 
-Assessed 2026-07. Status: **in progress; phase 1 slice 1a landed 2026-08** —
+Assessed 2026-07. Status: **in progress; phase 1 landed** (slice 1a 2026-08,
+slice 1b 2026-10) —
 this document records the settled design and its implementation progress (the
 ROADMAP links here from the M6 tooling item). The goal: a full-screen text-mode
 IDE in the spirit
@@ -203,6 +204,39 @@ Found while writing slice 1a, both worth knowing before phase 1 continues:
      existing path it cannot load, and F10 on a dirty buffer presents Save /
      Discard / Cancel rather than silently losing work. Terminal EOF performs
      a best-effort atomic save and reports failure after restoring the terminal.
+   - ✅ **Slice 1b: menus, dialogs, search, blocks, F9 build** (2026-10),
+     completing phase 1's list. `menu.e` is the menu bar with Turbo's
+     pull-downs (File, Edit, Search, Compile: black on grey, red hotkeys,
+     green selection, drop shadows), opened by F10 or Alt+title letter, and
+     the modal dialogs: a one-line input whose starting text is preselected
+     so typing replaces it, and a message box. `build.e` runs
+     `perl langdrv.pl -march=<host> -o <exe> <file>` through a new shim
+     call, `tsh_run` (fork/exec/waitpid with stdin from /dev/null and
+     stdout+stderr captured through one pipe, so the child never touches
+     the raw-mode terminal), and keeps every output line as a message: a
+     line starting `<file>:<line>:` is a location. The editor gains the
+     message pane, File Open/Save as (a modified buffer asks first), Find /
+     Search again (Ctrl-L) / Go to line, Shift+arrow selection with Cut /
+     Copy / Paste / Clear on Turbo's CUA keys, and F9: save, build, and land
+     on the first error at langc's caret column (when the echoed line still
+     matches), opening an `#include`d file when the error is in one;
+     Alt-F8/Alt-F7 step through the errors. F10 now opens the menu, as in
+     Turbo, so Alt-X is the quit key everywhere. The key decoder learned
+     xterm's modifier parameter (Shift/Alt/Ctrl on arrows, navigation keys
+     and F-keys, including `CSI 1;mP`-style F1-F4).
+   - **Findings**: the shim grew exactly where §2.1 said it would -- process
+     creation and the wait status are C-int and C-struct interfaces, as is
+     `uname` (`tsh_machine`), which the build needs because the driver
+     defaults to `-march=i386` and a 64-bit host may not be able to link
+     that. Nothing in the language got in the way: three new units share
+     state through `var extern`, menus are parallel arrays filled at
+     startup, and commands are an `enum`. The PTY tests needed one new
+     tool, a snapshot mark (`ptyrun.py`'s `s`, `screen.py --snap N`), to
+     assert on a menu or dialog while it is open; build results are read
+     from the final screen instead, so a slow build cannot race them.
+   - **Not yet**: multi-unit programs (the build compiles the one open file;
+     Turbo's project files are the model), Run (Ctrl-F9), undo, Replace,
+     and case-insensitive search.
 3. **Phase 2**: gdb/MI debugging — structured MI parser, dedicated inferior
    PTY and console pane, breakpoint margin, F7/F8, watch and call-stack
    windows.
