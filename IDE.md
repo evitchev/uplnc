@@ -124,8 +124,7 @@ and other languages" reduces mostly to configuration.
 
 - ~~**15-char identifiers, and `Struct.method` mangles ≤ 15 total**~~ —
   raised (2026-10): identifiers and mangles now hold 63 characters
-  (LANGUAGE.md §14). The 158-byte source line is now the tighter bound on
-  long names.
+  (LANGUAGE.md §14).
 - ~~**16,000-byte string-literal pool per unit**~~ — removed preemptively
   (2026-08): the per-unit pool grows on demand, so an IDE full of UI text no
   longer hits a wall. Borland's own approach — help/UI text in external files
@@ -136,7 +135,8 @@ and other languages" reduces mostly to configuration.
 - **Indirect calls return `int` only** — handler tables fit today; a
   pointer-returning handler would extend the typed-return story to indirect
   calls (a natural future language item).
-- 158-byte source lines, 6000-byte macro pool: minor, workable.
+- ~~158-byte source lines, 6000-byte macro pool~~ — raised (2026-10):
+  lines hold 1023 bytes and lpp1's macro table grows on demand.
 
 Found while writing slice 1a, both worth knowing before phase 1 continues:
 
